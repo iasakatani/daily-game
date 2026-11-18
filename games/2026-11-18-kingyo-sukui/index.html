@@ -1234,7 +1234,10 @@ function saveBest(dev, score, title, cleared){
 function loadBest(){
   try{
     const s = localStorage.getItem('kingyo_sukui_best_v1');
-    if(s) G.best = JSON.parse(s);
+    if(s){
+      const b = JSON.parse(s);
+      G.best = (b && typeof b.score === 'number' && isFinite(b.score)) ? b : null;
+    }
   }catch(e){ G.best = null; }
 }
 
@@ -1357,7 +1360,7 @@ function depositAll(){
     floatText(L.bowl.x + rand(-8,8), L.bowl.y - L.bowl.r - 8, '+'+S.pts, '#ffe6b0', 11);
     SFX.deposit(i);
   }
-  ripple(L.poi.x, L.surfaceY, 14, 80, 0.65);
+  ripple(G.poi.x, L.surfaceY, 14, 80, 0.65);
   splash(G.poi.x, L.surfaceY, 7, 70, 'rgba(220,250,255,0.9)');
   if(G.caught >= G.stage.goal) triggerClear();
 }
@@ -2340,10 +2343,14 @@ function loop(now){
   last = now;
   if(!isFinite(dt) || dt < 0) dt = 0.016;
   dt = Math.min(dt, 0.05);
-  update(dt);
-  render();
-  if(G.mode === 'result') drawBowl();
-  if(!screens.title.classList.contains('hidden')) drawTitleArt();
+  try {
+    update(dt);
+    render();
+    if(G.mode === 'result') drawBowl();
+    if(!screens.title.classList.contains('hidden')) drawTitleArt();
+  } catch(e) {
+    console.error('[loop]', e);
+  }
   requestAnimationFrame(loop);
 }
 
