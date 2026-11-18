@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>毎日ゲーム工場 — AIが毎日1個つくる無料ブラウザゲーム</title>
+<meta name="description" content="AIが毎日1個、登録なしで遊べる無料ブラウザゲームを自動制作するプロジェクト。">
+<meta property="og:title" content="毎日ゲーム工場">
+<meta property="og:description" content="AIが毎日1個、登録なしで遊べる無料ブラウザゲームを自動制作。">
+<style>
+:root{--bg:#faf6f0;--card:#ffffff;--ink:#3a3530;--sub:#94897c;--accent:#ff5e62;--accent2:#ff9966;--line:#ece4da;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;background:var(--bg);color:var(--ink);}
+header{background:linear-gradient(135deg,#ff9966,#ff5e62 55%,#ff7eb3);color:#fff;text-align:center;padding:64px 16px 84px;position:relative;overflow:hidden;}
+header::after{content:"";position:absolute;left:-10%;right:-10%;bottom:-70px;height:140px;background:var(--bg);border-radius:50% 50% 0 0;}
+h1{font-size:clamp(24px,5vw,40px);letter-spacing:.04em;}
+.tagline{margin-top:12px;font-size:15px;opacity:.92;}
+.count{margin-top:20px;display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);padding:8px 18px;border-radius:99px;font-size:14px;}
+main{max-width:920px;margin:0 auto;padding:0 16px 80px;position:relative;z-index:1;}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;margin-top:8px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s ease,box-shadow .18s ease;}
+.card:hover{transform:translateY(-4px);box-shadow:0 10px 24px rgba(120,80,40,.12);}
+.thumb{position:relative;aspect-ratio:420/900;max-height:340px;overflow:hidden;background:linear-gradient(160deg,#f3ece3,#e5d9c9);}
+.card:nth-child(3n+1) .thumb{background:linear-gradient(160deg,#ffe3d3,#ffc9b0);}
+.card:nth-child(3n+2) .thumb{background:linear-gradient(160deg,#d9ecff,#bcd9f5);}
+.card:nth-child(3n) .thumb{background:linear-gradient(160deg,#e2f2dc,#c4e3bb);}
+.thumb img{width:100%;height:100%;object-fit:cover;object-position:top;display:block;}
+.badge{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;padding:4px 10px;border-radius:99px;letter-spacing:.06em;}
+.genre{position:absolute;top:10px;right:10px;background:rgba(255,94,98,.92);color:#fff;font-size:11px;padding:4px 10px;border-radius:99px;}
+.body{padding:16px;display:flex;flex-direction:column;gap:8px;flex:1;}
+.title{font-size:17px;font-weight:700;line-height:1.4;}
+.desc{font-size:13px;color:var(--sub);line-height:1.6;flex:1;}
+.play{display:block;text-align:center;background:linear-gradient(135deg,var(--accent2),var(--accent));color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:12px;border-radius:12px;letter-spacing:.08em;}
+.play:hover{opacity:.9;}
+.empty{margin-top:40px;text-align:center;color:var(--sub);line-height:2;}
+footer{border-top:1px solid var(--line);padding:32px 16px;text-align:center;color:var(--sub);font-size:12.5px;line-height:1.9;background:var(--card);}
+footer a{color:var(--accent);text-decoration:none;}
+</style>
+</head>
+<body>
+<header>
+  <h1>毎日ゲーム工場</h1>
+  <p class="tagline">AIが毎日1個、登録なしで遊べる無料ブラウザゲームをつくります。</p>
+  <div class="count" id="count">読み込み中…</div>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+  <p class="empty" id="empty" style="display:none">まだゲームがありません。<br>最初の自動実行をお待ちください。</p>
+</main>
+<footer>
+  このサイトのゲームは OpenCode + AI が毎日自動制作しています。<br>
+  遊んだ結果をXに投稿してくれるとうれしいです。
+</footer>
+<script>
+fetch("games.json")
+  .then(function (r) { return r.json(); })
+  .then(function (data) {
+    var games = (data && data.games) ? data.games : [];
+    games.sort(function (a, b) { return b.date < a.date ? -1 : 1; });
+    var grid = document.getElementById("grid");
+    var empty = document.getElementById("empty");
+    document.getElementById("count").textContent = "現在 " + games.length + " 本のゲーム";
+    if (!games.length) { empty.style.display = "block"; return; }
+    var today = new Date().toISOString().slice(0, 10);
+    games.forEach(function (g) {
+      var card = document.createElement("a");
+      card.className = "card";
+      card.href = g.url;
+      var isNew = g.date >= today;
+      card.innerHTML =
+        '<div class="thumb">' +
+        '<img loading="lazy" src="' + g.url + 'screenshot.png" alt="" ' +
+        'onerror="this.style.display=\'none\'">' +
+        '<span class="badge">' + g.date + (isNew ? " NEW" : "") + "</span>" +
+        (g.genre ? '<span class="genre"></span>' : "") +
+        "</div>" +
+        '<div class="body">' +
+        '<div class="title"></div>' +
+        '<div class="desc"></div>' +
+        '<span class="play">遊ぶ ▶</span>' +
+        "</div>";
+      card.querySelector(".title").textContent = g.title;
+      card.querySelector(".desc").textContent = g.description || "";
+      var gen = card.querySelector(".genre");
+      if (gen) gen.textContent = g.genre || "";
+      grid.appendChild(card);
+    });
+  })
+  .catch(function () {
+    document.getElementById("count").textContent = "ゲーム一覧の読み込みに失敗しました";
+  });
+</script>
+</body>
+</html>
