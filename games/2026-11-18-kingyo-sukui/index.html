@@ -198,6 +198,20 @@
   .best-line b{color:#c9a86a}
   .newbest{display:inline-block;margin-left:4px;font-size:8px;letter-spacing:.08em;color:#0a1023;background:#ffd98a;border-radius:3px;padding:1px 4px;vertical-align:1px}
 
+  /* ============ TITLE CATALOG ============ */
+  .tcat{border:1px solid rgba(233,200,132,.22);border-radius:6px;padding:8px 9px 9px;margin:0 0 10px;
+    background:rgba(9,14,30,.5)}
+  .tcat-h{font-size:8.5px;letter-spacing:.22em;color:#c9a86a;margin-bottom:6px;display:flex;justify-content:space-between}
+  .tcat-h span{color:#8e9cb8;letter-spacing:.06em;font-variant-numeric:tabular-nums}
+  .tcat-list{display:flex;flex-wrap:wrap;gap:3px}
+  .tchip{font-size:9px;color:#dfe7f3;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);
+    border-radius:4px;padding:2px 6px;letter-spacing:.02em}
+  .tchip.off{color:#5a6680;background:transparent;border-color:rgba(255,255,255,.05)}
+  .tchip.new{color:#ff8a67;border-color:rgba(255,110,80,.6);background:rgba(224,80,63,.16)}
+  .tchip.hint{font-size:8.5px;color:#93a0b8;border-style:dashed;padding:2px 5px}
+  .tnext{margin-top:7px;font-size:9px;color:#a9b8d0;letter-spacing:.04em;line-height:1.6}
+  .tnext b{color:#ffd98a;font-weight:700}
+
   /* ============ MISC ============ */
   #mute{position:fixed;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 10px);z-index:20;
     width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
@@ -252,7 +266,7 @@
   </div>
 </div>
 
-<div class="fadehint" id="hint">すくったら、上へ持ち上げる</div>
+<div class="fadehint" id="hint">金魚の下から、上へすくい上げる</div>
 
 <div class="screen" id="scrTitle">
   <div class="card title-card">
@@ -263,7 +277,7 @@
     <p class="lead">水に浸けた分だけ、紙は弱る。<br><b>欲張るほど、破れる音が近づく。</b></p>
     <div class="meta"><span>全<b>6</b>関門</span><span>ポイは<b>1枚</b></span><span>約<b>3</b>分</span></div>
     <button class="btn-primary" id="btnStart">屋台へいく</button>
-    <p class="tip">ポイを沈めて金魚の下へ。すくったら、<b>そっと持ち上げる</b>。</p>
+    <p class="tip">ポイを金魚の下へ潜らせ、<b>上へすくい上げる</b>。それだけ。</p>
   </div>
 </div>
 
@@ -276,7 +290,7 @@
     <div class="goal-grid">
       <div><span>すくう数</span><b id="introGoal">3匹</b></div>
       <div><span>制限時間</span><b id="introTime">45秒</b></div>
-      <div><span>ポイ紙</span><b>新品</b></div>
+      <div><span>ポイ紙</span><b id="introPaper">新品</b></div>
     </div>
     <div class="newel quiet" id="introNew"><span>ルール</span><span id="introNewTxt">ポイを沈めて金魚の下へ。すくったら上へ。</span></div>
     <button class="btn-primary" id="btnGo">すくいはじめる</button>
@@ -329,7 +343,9 @@
     <div class="res-meta">
       <div>最後のポイ紙 <b id="resPaper">0%</b></div>
       <div>破れ方 <b id="resBreak">―</b></div>
+      <div>最多同時すくい <b id="resCarry">0匹</b></div>
     </div>
+    <div class="tcat" id="titleCat"></div>
     <div class="res-actions">
       <button class="btn-ghost gold" id="btnRetry">同じ関門から</button>
       <button class="btn-primary" id="btnAgain">もう一度</button>
@@ -435,7 +451,14 @@ const SFX = {
   fail: function(){ tone(300,0.4,'sine',0.06,140); tone(200,0.5,'triangle',0.05,90,0.12); },
   tick: function(){ tone(1200,0.05,'square',0.028); },
   snag: function(){ noise(0.2,0.05,600); tone(150,0.2,'triangle',0.05,90); },
-  start: function(){ tone(392,0.12,'triangle',0.05); tone(587,0.16,'triangle',0.05,0,0.1); }
+  start: function(){ tone(392,0.12,'triangle',0.05); tone(587,0.16,'triangle',0.05,0,0.1); },
+  creak: function(n){ noise(0.09+n*0.05, 0.085, 1500+n*700); tone(190+n*70, 0.08, 'square', 0.022, 120); },
+  boss: function(){ tone(72, 0.6, 'sawtooth', 0.09, 44); tone(48, 0.7, 'sine', 0.08, 36, 0.08); noise(0.5, 0.05, 240); },
+  finalClear: function(){
+    [392,523,659,784,1047,1319].forEach(function(f,i){ tone(f,0.24,'triangle',0.055,0,0.12+i*0.09); });
+    tone(1568,0.5,'sine',0.05,0,0.12+6*0.09);
+  },
+  sorry: function(){ tone(340,0.28,'sine',0.03,240); }
 };
 
 /* ================= DATA ================= */
@@ -448,28 +471,28 @@ const SPECIES = {
 const SPECIES_ORDER = ['wakin','sarasa','ryukin','demekin'];
 
 const STAGES = [
-  { name:'宵の屋台', goal:3, time:45, spawn:{wakin:3}, drainBase:0.95, drainCarry:1.5,
-    fishSpeed:25, flee:62, speedLimit:720, paper:100, pop:6,
+  { name:'宵の屋台', goal:3, time:45, spawn:{wakin:3}, drainBase:0.38, drainCarry:0.62,
+    fishSpeed:25, flee:62, speedLimit:720, pop:6,
     intro:'最初の金魚は、いちばん素直。', clearLine:'おやじが、少しだけ笑った。',
     tip:'焦らない。紙は、正直に弱る。', newEl:null },
-  { name:'出目金横丁', goal:4, time:45, spawn:{wakin:2, demekin:2}, drainBase:1.1, drainCarry:1.65,
-    fishSpeed:31, flee:72, speedLimit:660, paper:100, pop:7,
+  { name:'出目金横丁', goal:4, time:45, spawn:{wakin:2, demekin:2}, drainBase:0.42, drainCarry:0.72,
+    fishSpeed:31, flee:72, speedLimit:660, pop:7,
     intro:'屋台の奥から、黒いのが出てきた。', clearLine:'黒い金魚が、バケツで不機嫌そうにしている。',
     tip:'重い金魚ほど、紙は早くへたる。', newEl:'出目金は重く、よく暴れる。持ち上げは急げ。' },
-  { name:'水草の迷路', goal:4, time:42, spawn:{wakin:2, sarasa:1, demekin:1}, drainBase:1.15, drainCarry:1.7,
-    fishSpeed:33, flee:76, speedLimit:640, paper:100, pop:7, plants:true,
+  { name:'水草の迷路', goal:4, time:42, spawn:{wakin:2, sarasa:1, demekin:1}, drainBase:0.46, drainCarry:0.76,
+    fishSpeed:33, flee:76, speedLimit:640, pop:7, plants:true,
     intro:'水槽の底に、緑が増えていた。', clearLine:'水草をかき分けた先に、次の関門。',
     tip:'水草は避けて通る。紙がもったいない。', newEl:'水草に触れるとポイがからまり、紙が傷む。' },
-  { name:'波紋の嵐', goal:5, time:42, spawn:{wakin:2, sarasa:2, ryukin:1}, drainBase:1.2, drainCarry:1.8,
-    fishSpeed:35, flee:82, speedLimit:560, paper:100, pop:8, waves:true, slip:true,
+  { name:'波紋の嵐', goal:5, time:42, spawn:{wakin:2, sarasa:2, ryukin:1}, drainBase:0.5, drainCarry:0.84,
+    fishSpeed:35, flee:82, speedLimit:560, pop:8, waves:true, slip:true,
     intro:'風が吹き込んで、水面がざわついた。', clearLine:'波を越えた。手はもう、水を覚えている。',
     tip:'金魚を乗せたまま、振り回すな。', newEl:'波が金魚を押し流す。速く動かすと金魚が滑り落ちる。' },
-  { name:'灯りが消える', goal:5, time:45, spawn:{wakin:2, sarasa:1, demekin:2}, drainBase:1.2, drainCarry:1.8,
-    fishSpeed:37, flee:86, speedLimit:560, paper:100, pop:8, plants:true, dark:true,
+  { name:'灯りが消える', goal:5, time:45, spawn:{wakin:2, sarasa:1, demekin:2}, drainBase:0.5, drainCarry:0.84,
+    fishSpeed:37, flee:86, speedLimit:560, pop:8, plants:true, dark:true,
     intro:'提灯の灯りが、ふっと細くなった。', clearLine:'灯りが戻った。金魚鉢が、さっきより重い。',
     tip:'暗くなったら、手元だけを見る。', newEl:'提灯の灯りが時折落ちる。手元だけが頼り。' },
-  { name:'金魚すくいの神様', goal:6, time:50, spawn:{wakin:2, sarasa:2, demekin:1, ryukin:1}, drainBase:1.35, drainCarry:2.0,
-    fishSpeed:41, flee:92, speedLimit:520, paper:100, pop:8, waves:true, slip:true, plants:true, dark:true,
+  { name:'金魚すくいの神様', goal:6, time:50, spawn:{wakin:2, sarasa:2, demekin:1, ryukin:1}, drainBase:0.58, drainCarry:0.95,
+    fishSpeed:41, flee:92, speedLimit:520, pop:8, waves:true, slip:true, plants:true, dark:true,
     intro:'屋台じゅうの金魚が、こちらを見ている。', clearLine:'屋台の外まで、拍手が聞こえる。',
     tip:'神様は、欲張らない。', newEl:'すべてが同時に来る。紙は、いちばん脆い。' }
 ];
@@ -480,6 +503,13 @@ const BREAK_TEXT = {
   speed:'あわてて振り回し、紙が裂けた',
   time:'時間切れ。金魚は、元気に泳いでいる'
 };
+/* 破れ原因ごとの、おやじの短い一言 */
+const OYAJI_LINES = {
+  weight:'おやじ「欲張りすぎだって」',
+  water:'おやじ「紙も、限度ってもんが」',
+  plant:'おやじ「水草さんに、謝りな」',
+  speed:'おやじ「手が速すぎたねえ」'
+};
 
 /* ================= STATE ================= */
 const G = {
@@ -488,10 +518,15 @@ const G = {
   parts:[], records:[], score:0, totalFish:0, speciesCount:{},
   snap:null, breakCause:null, breakKind:null, dieT:0, clearT:0, clearDelay:0,
   shake:0, flash:0, t:0, muted:false, best:null,
-  poi:{x:0,y:0,tx:0,ty:0,vx:0,vy:0,r:44,inside:false},
+  poi:{x:0,y:0,tx:0,ty:0,vx:0,vy:0,r:44,inside:false,sag:0,tilt:0,recoil:0,recoilV:0},
   pointer:{active:false, down:false, type:'mouse'},
   depositT:0, catchCd:0, snag:0, dry:0, maxCarry:0,
-  runId:1, tickAt:99, darkness:0, lastMove:0, hintT:0
+  runId:1, tickAt:99, darkness:0, lastMove:0, hintT:0,
+  slowT:0, hitstop:0, wasSub:false, warned30:false, warned15:false,
+  surreal2:false, surreal4:false, struggleX:0, struggleY:0, loadVal:0,
+  blackout:0, blackoutTarget:0, bossSpawned:false, bossRef:null, breakT:0,
+  snagPlant:-1, bossDeposited:false, bossPrompt:false, breakSide:-1,
+  paperMax:100, earnedTitles:[], newTitles:[]
 };
 G.speciesCount = { wakin:0, sarasa:0, ryukin:0, demekin:0 };
 
@@ -732,6 +767,9 @@ function drawFish(g, f, x, y, scale, alpha, wagAmp){
     if(f.vx < -4) face = -1;
     tilt = clamp(f.vy/220, -0.42, 0.42) * (face>0?1:-1);
     if(pair < 6) tilt = 0;
+  }else if(f.strX){
+    // すくわれた金魚は体ごと傾いて、ポイを引っ張り返す
+    tilt = clamp(f.strX*0.05, -0.55, 0.55);
   }
   const wag = Math.sin(G.t*f.wag + f.phase) * wagAmp;
 
@@ -874,47 +912,18 @@ function updateParts(dt){
         spark(p.x1, p.y1, 4, '#ffe2a0');
         ripple(p.x1, p.y1+6, 3, 22, 0.45, 'rgba(200,245,255,0.7)');
       }
+    }else if(p.t==='shred'){
+      if(p.y > L.surfaceY + 4){
+        // 水中抵抗: 紙片は勢いを失い、ゆっくり沈む
+        const dr = Math.exp(-2.6*dt);
+        p.vx *= dr; p.vr *= dr;
+        p.vy = lerp(p.vy, 24, 1 - Math.exp(-2.2*dt));
+      }else{
+        p.vy += 320*dt;
+      }
+      p.x += p.vx*dt; p.y += p.vy*dt; p.rot += p.vr*dt;
     }
     if(p.life >= p.dur) G.parts.splice(i,1);
-  }
-}
-function drawParts(g){
-  for(let i=0;i<G.parts.length;i++){
-    const p=G.parts[i];
-    const k = p.life/p.dur;
-    if(p.t==='ripple'){
-      const r = lerp(p.r0,p.r1,1-Math.pow(1-k,2));
-      g.strokeStyle = p.col;
-      g.globalAlpha = (1-k)*0.85;
-      g.lineWidth = Math.max(0.6, 2*(1-k));
-      g.beginPath(); g.ellipse(p.x,p.y,r,r*0.34,0,0,TAU); g.stroke();
-      g.globalAlpha = 1;
-    }else if(p.t==='drop'){
-      g.globalAlpha = (1-k)*0.9;
-      g.fillStyle = p.col;
-      g.beginPath(); g.arc(p.x,p.y,p.size,0,TAU); g.fill();
-      g.globalAlpha = 1;
-    }else if(p.t==='spark'){
-      g.globalAlpha = (1-k);
-      g.fillStyle = p.col;
-      g.fillRect(p.x-p.size/2, p.y-p.size/2, p.size, p.size);
-      g.globalAlpha = 1;
-    }else if(p.t==='text'){
-      g.globalAlpha = Math.min(1, (1-k)*2);
-      g.fillStyle = p.col;
-      g.font = '700 '+p.size+'px "Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif';
-      g.textAlign='center'; g.textBaseline='middle';
-      g.shadowColor='rgba(0,0,0,0.7)'; g.shadowBlur=4;
-      g.fillText(p.text,p.x,p.y);
-      g.shadowBlur=0;
-      g.globalAlpha = 1;
-    }else if(p.t==='fly'){
-      const wob = Math.sin(p.life*24)*0.4;
-      const ang = Math.atan2(-40, (p.x1-p.x0)||1);
-      drawFish(g, {sp:p.sp, r:SPECIES[p.sp].r, size:p.size||1, held:true, vx:60, vy:0, phase:p.life*10, wag:14, patches:[]},
-        p.x, p.y, 0.62, 1-k*0.15, 0.8);
-      void wob; void ang;
-    }
   }
 }
 
@@ -936,6 +945,7 @@ function resetPoi(){
   G.poi.y = L.surfaceY - 16;
   G.poi.tx = G.poi.x; G.poi.ty = G.poi.y;
   G.poi.vx = 0; G.poi.vy = 0;
+  G.poi.sag = 0; G.poi.tilt = 0; G.poi.recoil = 0; G.poi.recoilV = 0;
   G.depositT = 0; G.catchCd = 0; G.slipT = 0;
 }
 function resetRun(){
@@ -943,6 +953,8 @@ function resetRun(){
   G.score = 0; G.totalFish = 0;
   G.speciesCount = { wakin:0, sarasa:0, ryukin:0, demekin:0 };
   G.snap = null; G.breakCause = null; G.breakKind = null;
+  G.maxCarry = 0; G.newTitles = [];
+  G.surreal2 = false; G.surreal4 = false;
 }
 function makePlants(){
   G.plants = [];
@@ -1000,20 +1012,31 @@ function startStage(idx, retry){
     G.score = G.snap.score;
     G.speciesCount = Object.assign({}, G.snap.species);
     G.totalFish = G.snap.fish;
+    G.paper = G.snap.paper;          // 関門開始時の紙を復元(新品化の抜け道を塞ぐ)
+    G.paperMax = G.snap.paperMax;
+  }else if(idx === 0){
+    G.paper = 100; G.paperMax = 100; // 新品の紙を使うのは第1関門だけ
   }
-  G.snap = { score:G.score, species:Object.assign({},G.speciesCount), fish:G.totalFish };
+  G.snap = { score:G.score, species:Object.assign({},G.speciesCount), fish:G.totalFish,
+    paper:G.paper, paperMax:G.paperMax };
   G.stageIndex = idx;
   G.stage = STAGES[idx];
   G.timeLeft = G.stage.time;
-  G.paper = G.stage.paper;
   G.caught = 0; G.held = []; G.fish = []; G.parts = [];
   G.breakCause = null; G.breakKind = null;
   G.shake = 0; G.flash = 0; G.snag = 0; G.slipT = 0;
-  G.depositT = 0; G.catchCd = 0; G.maxCarry = 0;
+  G.depositT = 0; G.catchCd = 0;
   G.tickAt = Math.ceil(G.stage.time) - 10;
   G.darkness = 0; G.clearDelay = 0;
-  G.records[idx] = { n:idx+1, name:G.stage.name, goal:G.stage.goal, caught:0, paper:100, ok:false, reason:'', score:0 };
-  G.refill = 0.8; G.slipT = 0; G.depositT = 0;
+  G.slowT = 0; G.hitstop = 0; G.breakT = 0; G.wasSub = false;
+  G.warned30 = false; G.warned15 = false;
+  G.struggleX = 0; G.struggleY = 0;
+  G.blackout = 0; G.blackoutTarget = 0; G.bossSpawned = false; G.bossRef = null;
+  G.snagPlant = -1; G.bossDeposited = false; G.bossPrompt = false; G.breakSide = -1;
+  G.poi.sag = 0; G.poi.tilt = 0;
+  G.records[idx] = { n:idx+1, name:G.stage.name, goal:G.stage.goal, caught:0,
+    paper:Math.round(G.paper), ok:false, reason:'', score:G.score };
+  G.refill = 0.8;
   makePlants(); spawnBubbles(); fillFish(); resetPoi();
   G.mode = 'intro';
   buildDots();
@@ -1028,6 +1051,7 @@ function showIntroUI(idx){
   $('introLine').textContent = st.intro;
   $('introGoal').textContent = st.goal+'匹';
   $('introTime').textContent = st.time+'秒';
+  $('introPaper').textContent = (idx===0 ? '新品 ' : '持ち越し ') + Math.round(G.paper)+'%';
   $('introTip').textContent = st.tip;
   const box = $('introNew');
   if(st.newEl){
@@ -1035,7 +1059,7 @@ function showIntroUI(idx){
     box.innerHTML = '<b>新要素</b><span>'+st.newEl+'</span>';
   }else{
     box.classList.add('quiet');
-    box.innerHTML = '<b>ルール</b><span>ポイを沈めて金魚の下へ。すくったら、上へ持ち上げる。</span>';
+    box.innerHTML = '<b>ルール</b><span>金魚の下へ潜り、上へすくい上げる。静止していては、獲れない。</span>';
   }
   showScreen('intro');
   $('hud').classList.remove('on');
@@ -1066,6 +1090,17 @@ function triggerClear(){
   SFX.clear();
   G.flash = 0.7;
   for(let i=0;i<16;i++) spark(rand(L.x0+40,L.x1-40), rand(L.surfaceY+40,L.tubBottom-30), 1, '#ffe6a8');
+  // 紙は少し乾く。ただし、奇跡は起きない(最大+5)
+  G.paper = Math.min(100, G.paper + 5);
+  G.paperMax = Math.min(100, G.paperMax + 5);
+  // 最終関門制覇: 提灯の同時点灯と専用ジングル
+  if(G.stageIndex === STAGES.length - 1){
+    G.blackout = 0; G.blackoutTarget = 0;
+    G.flash = Math.min(1, G.flash + 0.45);
+    SFX.finalClear();
+    spark(Math.max(30, L.x0), 96, 14, '#ffd98a');
+    spark(Math.min(W-30, L.x1), 100, 14, '#ffd98a');
+  }
   $('hint').classList.remove('on');
 }
 
@@ -1095,20 +1130,69 @@ function failStage(kind, cause){
   rec.reason = kind === 'time' ? '時間切れ' : 'ポイ破れ';
   rec.score = G.score;
   if(kind === 'time'){
+    // お預かりはできません — 抱えた金魚も水槽へ帰す
+    for(let i=0;i<G.held.length;i++){
+      const f = G.held[i];
+      f.held = false;
+      f.x = G.poi.x + rand(-18,18);
+      f.y = Math.max(L.surfaceY+44, G.poi.y + rand(8,36));
+      f.vx = rand(-80,80); f.vy = rand(20,70);
+      f.slot = 0;
+      G.fish.push(f);
+    }
+    if(G.held.length > 0){
+      splash(G.poi.x, Math.min(G.poi.y+10, L.tubBottom-10), 8, 80);
+      ripple(G.poi.x, L.surfaceY, 10, 70, 0.7);
+    }
+    G.held = [];
+    G.struggleX = 0; G.struggleY = 0; G.poi.sag = 0; G.poi.tilt = 0;
     G.shake = 8; SFX.fail();
-    floatText(W/2, L.surfaceY + 130, '時間切れ', '#ffd98a', 22, 1.8);
+    floatText(W/2, L.surfaceY + 120, '時間切れ', '#ffd98a', 22, 1.8);
+    floatText(clamp(G.poi.x, 118, W-118), L.surfaceY + 158, 'おやじ「お預かりはできません」', '#ffe6b0', 10.5, 2.6);
     $('hint').classList.remove('on');
   }
 }
 
+/* 原因ごとに断片の出方が違う — weightは真二つ / plantは片側へ / speedは放射状 / waterはふやけて垂れる */
+function spawnBreakShreds(cause){
+  const cx = G.poi.x, cy = G.poi.y, r = G.poi.r;
+  const nShred = cause === 'speed' ? randi(12,18) : cause === 'water' ? randi(6,9) : randi(10,16);
+  for(let i=0;i<nShred;i++){
+    let vx, vy, soggy = false;
+    if(cause === 'speed'){
+      const a = (i/nShred)*TAU + rand(-0.2,0.2);
+      const s = rand(90,200);
+      vx = Math.cos(a)*s; vy = Math.sin(a)*s*0.7 - 60;
+    }else if(cause === 'plant'){
+      vx = G.breakSide*rand(10,120); vy = rand(-120,-10);
+    }else if(cause === 'water'){
+      soggy = true;
+      vx = rand(-30,30); vy = rand(-30,10);
+    }else{
+      vx = rand(-95,95); vy = rand(-140,-20);
+    }
+    addPart({ t:'shred',
+      x: cx + (cause === 'plant' ? G.breakSide*rand(0,r*0.7) : rand(-r*0.55,r*0.55)),
+      y: cy + rand(-r*0.4,r*0.4),
+      vx: vx, vy: vy,
+      rot: rand(0,TAU), vr: soggy ? rand(-2,2) : rand(-8,8),
+      w: soggy ? rand(4,8) : rand(5,11), h: soggy ? rand(5,10) : rand(3,7),
+      soggy: soggy,
+      life:0, dur: soggy ? rand(2.2,3.2) : rand(1.7,2.7) });
+  }
+}
 function breakPoi(cause){
   if(G.mode !== 'play') return;
   G.breakCause = cause;
   G.paper = 0;
   G.shake = 20; G.flash = 1;
   SFX.tear();
+  G.slowT = 0.4; G.breakT = 0;   // 0.4秒だけ、世界がゆっくりになる
   splash(G.poi.x, G.poi.y, 16, 130);
   ripple(G.poi.x, L.surfaceY, 14, 130, 0.85);
+  // 剥がれる方向は原因が決める — 水草側を覚えておく
+  G.breakSide = (G.snagPlant >= 0 && G.plants[G.snagPlant] && G.plants[G.snagPlant].x < G.poi.x) ? -1 : 1;
+  spawnBreakShreds(cause);
   for(let i=0;i<G.held.length;i++){
     const f = G.held[i];
     f.held = false;
@@ -1119,8 +1203,11 @@ function breakPoi(cause){
     G.fish.push(f);
   }
   G.held = [];
+  G.struggleX = 0; G.struggleY = 0; G.poi.sag = 0; G.poi.tilt = 0;
+  G.poi.recoil = 0; G.poi.recoilV = 0;
+  G.snagPlant = -1;
   floatText(G.poi.x, G.poi.y-20, 'ビリッ', '#ff9a7a', 18, 1.4);
-  floatText(Math.min(W-110, Math.max(110, G.poi.x)), G.poi.y-58, 'おやじ「あーあ」', '#ffe6b0', 11, 2.2);
+  floatText(Math.min(W-110, Math.max(110, G.poi.x)), G.poi.y-58, OYAJI_LINES[cause] || 'おやじ「あーあ」', '#ffe6b0', 11, 2.2);
   failStage('break', cause);
 }
 
@@ -1191,6 +1278,50 @@ function showResult(kind){
     ('自己ベスト <b>'+G.best.score.toLocaleString('ja-JP')+'点</b> ・ 偏差値 <b>'+G.best.dev+'</b> ・ '+G.best.title +
       (newBest ? '<span class="newbest">更新</span>' : '')) : '';
 
+  // 最多同時すくい
+  $('resCarry').textContent = G.maxCarry+'匹';
+
+  // 称号図鑑(???を含む一覧。今回初めて得た称号は朱色で開放)
+  if(G.earnedTitles.indexOf(info.title) < 0){
+    G.earnedTitles.push(info.title);
+    G.newTitles.push(info.title);
+    saveTitles();
+  }
+  const cat = $('titleCat');
+  let chtml = '<div class="tcat-h">称号図鑑<span>獲得 '+G.earnedTitles.length+' / '+ALL_TITLES.length+'</span></div><div class="tcat-list">';
+  for(let ci=0;ci<ALL_TITLES.length;ci++){
+    const tt = ALL_TITLES[ci];
+    const has = G.earnedTitles.indexOf(tt) >= 0;
+    const isNew = G.newTitles.indexOf(tt) >= 0;
+    if(has){
+      chtml += '<span class="tchip'+(isNew?' new':'')+'">'+tt+'</span>';
+    }else{
+      // 称号名は伏せたまま、獲り方のヒントだけ見せる
+      chtml += '<span class="tchip off hint">'+(TITLE_HINTS[tt]||'？？？')+'</span>';
+    }
+  }
+  chtml += '</div>';
+  // 未取得のうち、いちばん手近な1件だけを「次の狙い」へ出す
+  let nextT = null;
+  for(let ci=ALL_TITLES.length-1;ci>=0;ci--){
+    if(G.earnedTitles.indexOf(ALL_TITLES[ci]) < 0){ nextT = ALL_TITLES[ci]; break; }
+  }
+  chtml += nextT
+    ? '<div class="tnext">次の狙い <b>'+TITLE_HINTS[nextT]+'</b></div>'
+    : '<div class="tnext">全称号制覇 — 屋台はもう、あなたのもの。</div>';
+  cat.innerHTML = chtml;
+
+  // もう1回の動機
+  const locked = ALL_TITLES.length - G.earnedTitles.length;
+  const motives = [];
+  if(G.maxCarry < 5) motives.push('次は'+(G.maxCarry+1)+'匹同時');
+  if(locked > 0) motives.push('未開放の称号 '+locked+'個');
+  if(motives.length){
+    const bl = $('bestLine');
+    bl.innerHTML += (bl.innerHTML ? '<br>' : '') +
+      '<span style="color:#a9b8d0">もう1回: '+motives.join(' ・ ')+'</span>';
+  }
+
   const retryBtn = $('btnRetry');
   const againBtn = $('btnAgain');
   if(isAll){
@@ -1221,6 +1352,39 @@ function resultTitle(kind, cleared, dev){
   if(G.breakKind === 'time' && cleared === 0) return { title:'眺めて帰る人', desc:'金魚は元気。あなたも元気。それがいちばん。' };
   if(cleared >= 1) return { title:'縁日の通りすがり', desc:'ひとつ関門は越えた。屋台はまだ、開いている。' };
   return { title:'金魚と目が合った人', desc:'すくえなかったが、金魚とは通じ合った。たぶん。' };
+}
+const ALL_TITLES = [
+  '金魚すくいの神様','屋台の主','縁日の常連','金魚の友','ポイ職人','見習いすくい師',
+  '欲張りすぎて破れた人','紙一枚の男','水草に敗れた人','暴れすくい','眺めて帰る人',
+  '縁日の通りすがり','金魚と目が合った人'
+];
+/* 称号名は伏せたまま、獲り方だけ教える */
+const TITLE_HINTS = {
+  '金魚すくいの神様':'全関門制覇で偏差値79以上',
+  '屋台の主':'全6関門を同じ1枚で制覇',
+  '縁日の常連':'5関門突破で力尽きる',
+  '金魚の友':'4関門突破で力尽きる',
+  'ポイ職人':'3関門突破で力尽きる',
+  '見習いすくい師':'2関門突破で力尽きる',
+  '欲張りすぎて破れた人':'2匹以上の重みで破れる',
+  '紙一枚の男':'水に浸けすぎて溶かす',
+  '水草に敗れた人':'水草にからまって破れる',
+  '暴れすくい':'速く振り回して裂く',
+  '眺めて帰る人':'時間切れで0匹のまま帰る',
+  '縁日の通りすがり':'1関門だけ突破して帰る',
+  '金魚と目が合った人':'1匹もすくわずに帰る'
+};
+function loadTitles(){
+  try{
+    const s = localStorage.getItem('kingyo_sukui_titles_v1');
+    if(s){
+      const a = JSON.parse(s);
+      if(Array.isArray(a)) G.earnedTitles = a.filter(function(t){ return typeof t === 'string'; });
+    }
+  }catch(e){ G.earnedTitles = []; }
+}
+function saveTitles(){
+  try{ localStorage.setItem('kingyo_sukui_titles_v1', JSON.stringify(G.earnedTitles)); }catch(e){}
 }
 function saveBest(dev, score, title, cleared){
   let isNew = false;
@@ -1258,14 +1422,18 @@ function updateHUD(force){
   const secs = Math.max(0, Math.ceil(G.timeLeft));
   const mm = Math.floor(secs/60), ss = secs%60;
   const paper = Math.round(G.paper);
-  const key = G.stageIndex+'|'+secs+'|'+G.caught+'|'+paper+'|'+G.held.length;
+  const key = G.stageIndex+'|'+secs+'|'+G.caught+'|'+paper+'|'+G.held.length+'|'+(G.bossDeposited?1:0);
   if(!force && key === hudCache) return;
   hudCache = key;
   $('hudStage').innerHTML = '第'+(G.stageIndex+1)+'関門 <b>'+G.stage.name+'</b>';
   const tm = $('hudTime');
   tm.textContent = mm+':'+(ss<10?'0':'')+ss;
   tm.classList.toggle('warn', secs <= 10);
-  $('hudGoal').innerHTML = '目標 <b>'+G.caught+'/'+G.stage.goal+'</b>匹';
+  if(G.stageIndex === STAGES.length-1 && G.caught >= G.stage.goal && !G.bossDeposited){
+    $('hudGoal').innerHTML = '親分を <b>すくえ</b>';
+  }else{
+    $('hudGoal').innerHTML = '目標 <b>'+G.caught+'/'+G.stage.goal+'</b>匹';
+  }
   const pf = $('pfill');
   pf.style.width = clamp(paper,0,100)+'%';
   pf.classList.toggle('low', paper <= 30);
@@ -1288,64 +1456,132 @@ function updateHUD(force){
 /* ================= GAME UPDATE ================= */
 function isSubmerged(){ return G.poi.y > L.surfaceY + 4; }
 
+function waveCur(){
+  return Math.sin(G.t*0.7)*24 + Math.sin(G.t*1.9+1.3)*11;
+}
+
+/* すくった金魚の荷重と暴れ — 重さが紙のたわみ、枠の傾き、手の重さになる */
+function updateStruggleAndLoad(dt){
+  let load = 0, sx = 0, sy = 0;
+  for(let i=0;i<G.held.length;i++){
+    const f = G.held[i];
+    const w = f.sp === 'demekin' ? 1.45 : (f.sp === 'ryukin' ? 1.2 : 1);
+    load += (f.boss ? 2.1 : 1) * w;
+    if(f.struggleT == null) f.struggleT = 0.5;
+    f.struggleT -= dt;
+    if(f.struggleT <= 0){
+      if(f.sp === 'demekin' || f.boss){
+        f.struggleT = f.boss ? rand(0.45,0.7) : rand(0.6,1.0);
+        f.strX = rand(-1,1) * (f.boss ? rand(14,20) : rand(8,14));
+        f.strY = rand(-1,1) * (f.boss ? rand(10,16) : rand(6,10));
+      }else{
+        f.struggleT = rand(1.3,2.1);
+        f.strX = rand(-1,1) * rand(3,6);
+        f.strY = rand(-1,1) * rand(2,4);
+      }
+    }
+    const dk = Math.exp(-2.6*dt);
+    f.strX = (f.strX||0)*dk; f.strY = (f.strY||0)*dk;
+    sx += (f.strX||0); sy += (f.strY||0);
+  }
+  G.struggleX = sx; G.struggleY = sy;
+  G.loadVal = load;
+  // 紙中央は最大10pxたわみ、枠は2〜6度傾く
+  G.poi.sag = Math.min(10, load*2.4);
+  G.poi.tilt = clamp(G.poi.vx/260,-1,1)*(0.03 + 0.011*load)
+    + sx*0.006 + Math.sin(G.t*3.1)*0.02*load;
+}
+
 function updatePoi(dt){
   const p = G.poi;
-  const tx = clamp(p.tx, L.x0 + p.r*0.72 + 2, L.x1 - p.r*0.72 - 2);
-  const ty = clamp(p.ty, L.tubTop + p.r*0.62 + 2, L.tubBottom - p.r*0.5);
-  let rate = 20 - G.held.length*3.2;
+  const sub = isSubmerged();
+  const tx = clamp(p.tx + G.struggleX, L.x0 + p.r*0.72 + 2, L.x1 - p.r*0.72 - 2);
+  const ty = clamp(p.ty + G.struggleY, L.tubTop + p.r*0.62 + 2, L.tubBottom - p.r*0.5);
+  // 追従の鈍りは匹数でなく荷重基準 — 出目金1匹は和金1匹より、手にずしりと効く
+  let rate = clamp(20 - (G.loadVal||0)*2.8 - Math.max(0, G.held.length-1)*0.8, 6, 20);
+  if(sub) rate *= 0.55;          // 水の抵抗: 水中の追従は水上の0.55倍
   if(G.snag > 0) rate *= 0.55;
   const k = 1 - Math.exp(-Math.max(6,rate)*dt);
   const px = p.x, py = p.y;
   p.x += (tx - p.x)*k;
   p.y += (ty - p.y)*k;
+  if(sub && G.stage && G.stage.waves) p.x += waveCur()*0.55*dt;   // 波に流される
   const ivx = (p.x-px)/Math.max(dt,0.0001);
   const ivy = (p.y-py)/Math.max(dt,0.0001);
   p.vx = lerp(p.vx, ivx, 0.55);
   p.vy = lerp(p.vy, ivy, 0.55);
+  // 納品の反動 — 荷重が抜けた紙はバネ減衰で0.2秒ばかり跳ねて戻る
+  if(p.recoil !== 0 || p.recoilV !== 0){
+    const om = 30, ze = 0.24;
+    p.recoilV += (-om*om*p.recoil - 2*ze*om*p.recoilV)*dt;
+    p.recoil += p.recoilV*dt;
+    if(Math.abs(p.recoil) < 0.05 && Math.abs(p.recoilV) < 1){ p.recoil = 0; p.recoilV = 0; }
+  }
 }
 
 function tryCatch(){
   if(G.mode !== 'play' || G.catchCd > 0 || !isSubmerged()) return;
   if(G.poi.y < L.surfaceY + 8) return;
+  if(G.poi.vy > -35) return;   // 静止待ちでは獲れない。上向きのすくい上げだけが獲る
   for(let i=0;i<G.fish.length;i++){
     const f = G.fish[i];
+    if(f.y < G.poi.y + 2) continue;   // ポイより下側の金魚だけが捕獲対象
     const dx = f.x - G.poi.x;
     const dy = (f.y - G.poi.y)/0.8;
     const d = Math.hypot(dx,dy);
     if(d < G.poi.r*0.67){
       f.held = true; f.holdT = 0; f.slot = G.held.length;
       f.vx = 0; f.vy = 0;
+      f.struggleT = f.sp === 'demekin' ? rand(0.25,0.6) : rand(0.8,1.5);
+      f.strX = 0; f.strY = 0;
       G.held.push(f);
       G.fish.splice(i,1);
       G.catchCd = 0.16;
       G.maxCarry = Math.max(G.maxCarry, G.held.length);
+      // ヒットの手応え: 短い振動と0.05秒のヒットストップ
+      G.shake = Math.max(G.shake, 1.5);
+      G.hitstop = 0.05;
       splash(f.x, Math.min(L.surfaceY+8, f.y+8), 5, 55);
       ripple(G.poi.x, L.surfaceY, 8, 34, 0.5);
       floatText(f.x, f.y-16, SPECIES[f.sp].name, '#ffe6b0', 10);
       SFX.catch(G.held.length);
       G.flash = Math.min(0.5, G.flash + 0.16);
       if(G.held.length === 3) floatText(G.poi.x, G.poi.y - 42, 'そろそろ限界', '#ffb0a0', 10);
-      if(G.held.length >= 4) floatText(G.poi.x, G.poi.y - 42, '欲張りすぎ', '#ff8a70', 10);
+      if(G.held.length >= 4 && !G.surreal4){
+        G.surreal4 = true;
+        floatText(G.poi.x - 6, G.poi.y + G.poi.r*0.55, '紙「ごめん」', '#ffd9c4', 9, 2.2);
+        SFX.sorry();
+      }
+      if(G.held.length === 2 && !G.surreal2){
+        G.surreal2 = true;
+        floatText(clamp(G.poi.x,120,W-120), G.poi.y - 74, 'おやじ「……器用なことするねえ」', '#ffe6b0', 10.5, 2.6);
+      }
       return;
     }
   }
 }
 
-function updateHeld(dt){
+function positionHeld(dt){
   const slots = [[-0.3,-0.06],[0.3,0.08],[0,-0.26],[-0.4,0.2],[0.4,-0.16],[0.08,0.26]];
+  const wcur = (G.stage && G.stage.waves) ? waveCur()*0.4 : 0;
   for(let i=0;i<G.held.length;i++){
     const f = G.held[i];
     const s = slots[i % slots.length];
-    f.x = G.poi.x + s[0]*G.poi.r + Math.sin(G.t*10 + f.phase)*1.6;
-    f.y = G.poi.y + s[1]*G.poi.r*0.8 + Math.sin(G.t*13 + f.phase)*1.6;
+    f.x = G.poi.x + s[0]*G.poi.r + Math.sin(G.t*10 + f.phase)*1.6 + (f.strX||0)*0.35 + wcur;
+    f.y = G.poi.y + s[1]*G.poi.r*0.8 + G.poi.sag*0.55 + Math.sin(G.t*13 + f.phase)*1.6 + (f.strY||0)*0.35;
     f.holdT += dt;
     f.face = 1;
   }
 }
 
 function depositAll(){
+  const load = G.loadVal || 0;
   const arr = G.held.slice();
   G.held = [];
+  // 重さが抜けた瞬間、紙は上へ跳ね返る(バネ減衰はupdatePoiで)
+  G.poi.recoil = Math.min(7, load*3);
+  G.poi.recoilV = 0;
+  G.shake = Math.max(G.shake, Math.min(2, 1.2 + load*0.3));
   G.depositT = 0;
   G.catchCd = 0.3;
   for(let i=0;i<arr.length;i++){
@@ -1355,6 +1591,7 @@ function depositAll(){
     G.caught++;
     G.totalFish++;
     G.speciesCount[f.sp] = (G.speciesCount[f.sp]||0) + 1;
+    if(f.boss) G.bossDeposited = true;   // 親分の納品こそ、最終関門の鍵
     addPart({ t:'fly', x0:f.x, y0:f.y, x:f.x, y:f.y, x1:L.bowl.x, y1:L.bowl.y-L.bowl.r*0.5,
       life:0, dur:0.5 + i*0.06, sp:f.sp, size:f.size, done:false });
     floatText(L.bowl.x + rand(-8,8), L.bowl.y - L.bowl.r - 8, '+'+S.pts, '#ffe6b0', 11);
@@ -1362,13 +1599,26 @@ function depositAll(){
   }
   ripple(G.poi.x, L.surfaceY, 14, 80, 0.65);
   splash(G.poi.x, L.surfaceY, 7, 70, 'rgba(220,250,255,0.9)');
-  if(G.caught >= G.stage.goal) triggerClear();
+  // 最終関門は親分の納品までがクリア条件 — 親分を無視して終われない
+  if(G.stageIndex === STAGES.length-1){
+    if(G.caught >= G.stage.goal && G.bossDeposited) triggerClear();
+    else if(G.caught >= G.stage.goal && !G.bossDeposited && !G.bossPrompt){
+      G.bossPrompt = true;
+      floatText(clamp(G.poi.x,130,W-130), G.poi.y - 64, 'おやじ「親分が残ってるよ」', '#ffe6b0', 10.5, 2.6);
+    }
+  }else if(G.caught >= G.stage.goal){
+    triggerClear();
+  }
 }
 
 function releaseOneFish(label){
   if(G.held.length === 0) return;
   const f = G.held.pop();
   f.held = false;
+  if(f.boss){
+    G.bossPrompt = false;   // 親分の存在を、もう一度思い出させる
+    floatText(G.poi.x, G.poi.y - 52, '親分が抜けた', '#ffb0a0', 11, 1.8);
+  }
   f.x = G.poi.x + rand(-10,10);
   f.y = Math.max(L.surfaceY+34, G.poi.y + rand(4,16));
   f.vx = rand(-70,70); f.vy = rand(26,60);
@@ -1390,7 +1640,7 @@ function updateFish(dt){
   const st = G.stage;
   const flee = st ? st.flee : 60;
   const baseSpeed = st ? st.fishSpeed : 26;
-  const cur = (st && st.waves && G.mode === 'play') ? Math.sin(G.t*0.7)*24 + Math.sin(G.t*1.9+1.3)*11 : 0;
+  const cur = (st && st.waves && G.mode === 'play') ? waveCur() : 0;
   for(let i=0;i<G.fish.length;i++){
     const f = G.fish[i];
     if(f.held) continue;
@@ -1434,7 +1684,8 @@ function updateBubbles(dt){
 }
 
 function checkPlants(){
-  if(!G.stage || !G.stage.plants || !isSubmerged()) return;
+  if(!G.stage || !G.stage.plants) return;
+  if(!isSubmerged()){ G.snagPlant = -1; return; }
   for(let i=0;i<G.plants.length;i++){
     const p = G.plants[i];
     const topY = L.tubBottom - p.h;
@@ -1444,12 +1695,15 @@ function checkPlants(){
         floatText(G.poi.x, G.poi.y - G.poi.r*0.7 - 6, 'からまった', '#a8e8a0', 10);
       }
       G.snag = 0.32;
+      G.snagPlant = i;   // 接触中の水草を覚え、茎がポイへ絡みつく
       return;
     }
   }
+  if(G.snag <= 0.02) G.snagPlant = -1;   // 非接触では、ほどけ終わった時に解除する
 }
 
 function updateDarkness(dt){
+  G.blackout = lerp(G.blackout, G.blackoutTarget||0, 1 - Math.exp(-2.2*dt));
   const st = G.stage;
   if(st && st.dark && G.mode === 'play'){
     const cycle = 7.6;
@@ -1465,14 +1719,36 @@ function updateDarkness(dt){
   }
 }
 
+/* 最終関門の山場: 4/6匹で提灯が消え、親分出目金が現れる */
+function spawnBoss(){
+  G.bossSpawned = true;
+  G.blackoutTarget = 1;
+  const bx = clamp(G.poi.x < W/2 ? W/2 + 90 : W/2 - 90, L.x0+50, L.x1-50);
+  const by = (L.surfaceY + L.tubBottom)/2 + rand(-20,20);
+  const b = makeFish('demekin', bx, by, {speedMul:0.85});
+  b.size = 1.5; b.boss = true;
+  b.vx = (bx > W/2 ? -1 : 1)*38;
+  G.fish.push(b);
+  G.bossRef = b;
+  SFX.boss();
+  ripple(b.x, L.surfaceY, 12, 90, 1.0);
+  ripple(b.x, b.y, 6, 40, 0.8, 'rgba(255,180,140,0.4)');
+  G.shake = Math.max(G.shake, 6);
+  floatText(W/2, L.surfaceY + 84, 'おやじ「……おっと。親分だ」', '#ffe6b0', 11, 2.8);
+}
+
 function update(dt){
-  G.t += dt;
+  // スローモーション(破れの瞬間)とヒットストップ(捕獲の瞬間)
+  G.slowT = Math.max(0, G.slowT - dt);
+  G.hitstop = Math.max(0, G.hitstop - dt);
+  const simDt = G.hitstop > 0 ? 0 : (G.slowT > 0 ? dt*0.25 : dt);
+  G.t += simDt;
   G.flash = Math.max(0, G.flash - dt*2.4);
   G.shake *= Math.exp(-7*dt);
-  G.catchCd = Math.max(0, G.catchCd - dt);
-  G.snag = Math.max(0, G.snag - dt);
-  updateBubbles(dt);
-  updateDarkness(dt);
+  G.catchCd = Math.max(0, G.catchCd - simDt);
+  G.snag = Math.max(0, G.snag - simDt);
+  updateBubbles(simDt);
+  updateDarkness(simDt);
 
   if(G.mode === 'title'){
     G.poi.x = W/2 + Math.sin(G.t*0.55)*Math.min(W*0.16, 90);
@@ -1484,8 +1760,8 @@ function update(dt){
     G.poi.y = L.surfaceY - 26 + Math.sin(G.t*1.1)*3;
     G.poi.tx = G.poi.x; G.poi.ty = G.poi.y;
   }else if(G.mode === 'play'){
-    G.stageT += dt;
-    G.timeLeft -= dt;
+    G.stageT += simDt;
+    G.timeLeft -= simDt;
     const secs = Math.ceil(G.timeLeft);
     if(G.timeLeft <= 10 && secs !== G.tickAt && secs > 0){
       G.tickAt = secs;
@@ -1493,33 +1769,53 @@ function update(dt){
     }
     if(G.timeLeft <= 0){ G.timeLeft = 0; failStage('time'); }
     if(G.mode === 'play'){
-      updatePoi(dt);
+      updateStruggleAndLoad(simDt);
+      updatePoi(simDt);
       checkPlants();
       const sub = isSubmerged();
+      // 入水・離水の瞬間へ、速度に比例した飛沫と音
+      if(sub !== G.wasSub){
+        const sspd = Math.hypot(G.poi.vx, G.poi.vy);
+        const sv = clamp(sspd/420, 0.3, 1);
+        SFX.splash(0.03 + sv*0.05);
+        splash(G.poi.x, L.surfaceY+2, Math.round(3+sv*9), 50+sv*95);
+        ripple(G.poi.x, L.surfaceY, 9+sv*20, 26+sv*80, 0.55+sv*0.25);
+        G.wasSub = sub;
+      }
       if(sub){
         let carryDrain = 0;
         for(let hi=0;hi<G.held.length;hi++){
           const hs = G.held[hi].sp;
-          carryDrain += G.stage.drainCarry * (hs === 'demekin' ? 1.45 : (hs === 'ryukin' ? 1.2 : 1));
+          carryDrain += G.stage.drainCarry * (hs === 'demekin' ? 1.45 : (hs === 'ryukin' ? 1.2 : 1)) * (G.held[hi].boss ? 1.6 : 1);
         }
         let drain = G.stage.drainBase + carryDrain;
-        if(G.snag > 0) drain += 2.2;
+        if(G.snag > 0) drain += 1.6;
         const sp = Math.hypot(G.poi.vx, G.poi.vy);
         drain += clamp((sp - G.stage.speedLimit)/280, 0, 2.4)*0.65;
-        G.paper -= drain*dt;
+        G.paper -= drain*simDt;
+        // 破れる前、紙は乾いた音で予感を鳴らす
+        if(G.paper >= 30) G.warned30 = false;
+        if(G.paper >= 15) G.warned15 = false;
+        if(G.paper < 30 && !G.warned30){
+          G.warned30 = true; SFX.creak(1); G.shake = Math.max(G.shake, 2.5);
+        }
+        if(G.paper < 15 && !G.warned15){
+          G.warned15 = true; SFX.creak(2); G.shake = Math.max(G.shake, 3.5);
+        }
         if(G.paper <= 0){
           G.paper = 0;
           const cause = G.held.length >= 2 ? 'weight' : (G.snag > 0 ? 'plant' : (sp > G.stage.speedLimit + 80 ? 'speed' : 'water'));
           breakPoi(cause);
         }
       }else{
-        G.paper = Math.min(100, G.paper + 0.7*dt);
+        // 空気中でわずかに乾くが、関門開始時以上には戻らない
+        G.paper = Math.min(G.paperMax, G.paper + 0.5*simDt);
       }
       if(G.mode === 'play'){
         tryCatch();
-        updateHeld(dt);
+        positionHeld(simDt);
         if(G.held.length > 0 && G.poi.y < L.surfaceY + 2){
-          G.depositT += dt;
+          G.depositT += simDt;
           if(G.depositT > 0.26) depositAll();
         }else if(G.poi.y >= L.surfaceY + 2){
           G.depositT = 0;
@@ -1527,13 +1823,23 @@ function update(dt){
         if(G.mode === 'play' && G.stage.slip && G.held.length > 0 && sub){
           const sp2 = Math.hypot(G.poi.vx, G.poi.vy);
           if(sp2 > G.stage.speedLimit){
-            G.slipT += dt * clamp((sp2 - G.stage.speedLimit)/280, 0, 1.2);
+            G.slipT += simDt * clamp((sp2 - G.stage.speedLimit)/280, 0, 1.2);
             if(G.slipT > 0.62){ releaseOneFish('ぬるっ'); G.slipT = 0; }
           }else{
-            G.slipT = Math.max(0, G.slipT - dt*2);
+            G.slipT = Math.max(0, G.slipT - simDt*2);
           }
         }
-        G.refill -= dt;
+        if(G.mode === 'play' && G.stageIndex === STAGES.length-1 && G.bossSpawned && !G.bossDeposited){
+          const br = G.bossRef;
+          if(!br || (G.fish.indexOf(br) < 0 && G.held.indexOf(br) < 0)){
+            G.bossSpawned = false;   // 参照を失ったら再出現 — 必須ゆえ、詰ませない
+            G.bossRef = null;
+          }
+        }
+        if(G.mode === 'play' && G.stageIndex === STAGES.length-1 && !G.bossSpawned && G.caught >= 4){
+          spawnBoss();
+        }
+        G.refill -= simDt;
         if(G.refill <= 0 && G.fish.length + G.held.length < G.stage.pop && G.caught < G.stage.goal){
           placeFish(pickSpecies());
           G.refill = 1.3;
@@ -1542,15 +1848,16 @@ function update(dt){
       }
     }
   }else if(G.mode === 'dying'){
-    G.dieT += dt;
+    G.dieT += dt;                 // リザルト遷移は実時間で進む
+    G.breakT += simDt;            // 紙の2片はスローモーションの中で割れる
     if(G.dieT > 1.7) showResult(G.breakKind === 'time' ? 'time' : 'break');
   }else if(G.mode === 'clearing'){
     G.clearT += dt;
     if(G.clearT > 1.5) showClearUI();
   }
 
-  updateFish(dt);
-  updateParts(dt);
+  updateFish(simDt);
+  updateParts(simDt);
 
   // held prompt
   const hint = $('hint');
@@ -1617,15 +1924,17 @@ window.addEventListener('resize', function(){ computeLayout(); if(G.stage) updat
 /* ================= RENDER ================= */
 function drawLantern(g, x, topY, r, h, ch, i){
   const sway = Math.sin(G.t*0.7 + i*1.9)*0.05;
+  // 暗さ(第5関門の消灯)と親分出現の全消灯で、提灯は実際に弱まる
+  const dim = clamp(1 - G.darkness*0.8 - G.blackout*0.92, 0.03, 1);
   g.save();
   g.translate(x, topY);
   g.rotate(sway);
-  g.strokeStyle = 'rgba(220,190,150,0.32)';
+  g.strokeStyle = 'rgba(220,190,150,'+(0.32*dim)+')';
   g.lineWidth = 1.4;
   g.beginPath(); g.moveTo(0, -topY+20); g.lineTo(0, 1); g.stroke();
 
   const cy = 6 + r*0.9;
-  const gl = 0.62 + Math.sin(G.t*2.1 + i)*0.16;
+  const gl = (0.62 + Math.sin(G.t*2.1 + i)*0.16)*dim;
   const rg = g.createRadialGradient(0, cy, 2, 0, cy, r*3.6);
   rg.addColorStop(0, 'rgba(255,132,78,'+(0.3*gl)+')');
   rg.addColorStop(0.5, 'rgba(255,96,56,'+(0.1*gl)+')');
@@ -1642,6 +1951,10 @@ function drawLantern(g, x, topY, r, h, ch, i){
   lg.addColorStop(0.72, '#c53a27');
   lg.addColorStop(1, '#651710');
   g.fillStyle = lg; g.fill();
+  if(dim < 0.96){
+    g.beginPath(); g.ellipse(0, cy, r, h*0.5, 0, 0, TAU);
+    g.fillStyle = 'rgba(6,6,16,'+((1-dim)*0.82)+')'; g.fill();
+  }
 
   g.strokeStyle = 'rgba(60,10,8,0.25)'; g.lineWidth = 1;
   for(let k=-2;k<=2;k++){
@@ -1652,7 +1965,7 @@ function drawLantern(g, x, topY, r, h, ch, i){
   g.fillStyle = '#d9b273';
   g.fillRect(-r*0.34, cy-h*0.5-3, r*0.68, 4);
   g.fillRect(-r*0.34, cy+h*0.5-1, r*0.68, 4);
-  g.fillStyle = 'rgba(45,10,6,0.82)';
+  g.fillStyle = 'rgba(45,10,6,'+(0.2+0.62*dim)+')';
   g.font = '700 '+(r*0.82)+'px "Hiragino Mincho ProN","Yu Mincho",serif';
   g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(ch, 0, cy+1);
@@ -1694,19 +2007,201 @@ function drawPlants(g){
   }
 }
 
+/* からまった水草は茎を伸ばしてポイへ食い込む — G.snagが減るほど茎は滑ってほどける */
+function drawSnagVines(g){
+  if(G.snag <= 0.02 || G.snagPlant < 0 || !G.plants[G.snagPlant]) return;
+  const p = G.plants[G.snagPlant];
+  const hold = clamp(G.snag/0.32, 0, 1);            // 掴まり具合。減るほど滑ってほどける
+  const tipX = p.x + Math.sin(G.t*1.1 + p.ph)*7 + p.lean*0.6;
+  const tipY = L.tubBottom - p.h;
+  const P = G.poi;
+  const side = tipX < P.x ? -1 : 1;
+  // 縁の絡み点 — ほどけるに連れて縁から滑り落ちる
+  const slip = (1 - hold)*18;
+  const rx = P.x + side*P.r*(0.98 - (1 - hold)*0.25);
+  const ry = P.y - P.r*0.2 + slip;
+  g.strokeStyle = 'rgba(52,128,84,'+(0.35 + hold*0.55)+')';
+  g.lineWidth = 3.2*hold + 0.8;
+  g.lineCap = 'round';
+  // 1本は枠へ巻きつく
+  g.beginPath();
+  g.moveTo(tipX, tipY);
+  g.bezierCurveTo(tipX + side*10, (tipY + ry)/2, (tipX + rx)/2 + side*14, ry - 20, rx, ry);
+  g.stroke();
+  g.beginPath();
+  g.ellipse(P.x, P.y, P.r + 2.5, P.r*0.78 + 2, 0,
+    side < 0 ? Math.PI*0.75 : -Math.PI*0.25,
+    side < 0 ? Math.PI*1.55 : Math.PI*0.55, false);
+  g.stroke();
+  // もう1本は紙の裂け目へ食い込む
+  const crX = P.x + side*P.r*0.3;
+  const crY = P.y + P.r*0.42 + (1 - hold)*10;
+  g.lineWidth = 2.6*hold + 0.7;
+  g.beginPath();
+  g.moveTo(tipX + side*6, tipY + 6);
+  g.bezierCurveTo(tipX + side*26, tipY + (crY - tipY)*0.4, crX + side*20, crY - 24, crX, crY);
+  g.stroke();
+  // 絡んだ先で、葉が1枚揺れている
+  g.fillStyle = 'rgba(58,136,86,'+(0.4 + hold*0.4)+')';
+  g.beginPath();
+  g.ellipse(rx + side*4, ry - 3, 8, 3, side*0.6, 0, TAU);
+  g.fill();
+  g.lineCap = 'butt';
+}
+
+/* ---- ポイ紙: たわみと段階的な破損を持つ一枚 ---- */
+const CRACK1 = [[0.02,-0.55],[0.08,-0.24],[-0.05,0.08],[0.06,0.34],[0,0.56]];
+const CRACK2 = [[0.97,-0.22],[0.66,-0.06],[0.38,0.12],[0.14,0.3]];
+function crackStroke(gg, pts, r, ry, w, frac){
+  if(frac == null) frac = 1;
+  if(frac <= 0) return;
+  gg.lineWidth = w; gg.lineJoin = 'round'; gg.lineCap = 'round';
+  gg.beginPath();
+  const segs = (pts.length-1)*frac;
+  const full = Math.floor(segs);
+  for(let i=0;i<=full && i<pts.length;i++){
+    const X = pts[i][0]*r, Y = pts[i][1]*ry;
+    if(i === 0) gg.moveTo(X,Y); else gg.lineTo(X,Y);
+  }
+  if(full < pts.length-1 && frac < 1){
+    const t = segs - full;
+    const A = pts[full], B = pts[full+1];
+    gg.lineTo(lerp(A[0],B[0],t)*r, lerp(A[1],B[1],t)*ry);
+  }
+  gg.stroke();
+  gg.lineJoin = 'miter'; gg.lineCap = 'butt';
+}
+function paperPath(gg, r, ry, sag){
+  gg.beginPath();
+  gg.moveTo(-r,0);
+  gg.bezierCurveTo(-r,-ry*1.34, r,-ry*1.34, r,0);
+  gg.bezierCurveTo(r,(ry+sag)*1.34, -r,(ry+sag)*1.34, -r,0);
+  gg.closePath();
+}
+const poiSpr = document.createElement('canvas');
+function drawPaperSprite(gg, r, ry, sag){
+  const wet = 1 - G.paper/100;
+  paperPath(gg, r, ry, sag);
+  const pg = gg.createRadialGradient(-r*0.3, -ry*0.3+sag*0.2, r*0.1, 0, sag*0.2, r);
+  pg.addColorStop(0, 'rgba(255,252,242,'+(0.94-wet*0.4)+')');
+  pg.addColorStop(1, 'rgba(228,216,188,'+(0.86-wet*0.46)+')');
+  gg.fillStyle = pg; gg.fill();
+  gg.save();
+  paperPath(gg, r, ry, sag); gg.clip();
+  // 網目
+  gg.strokeStyle = 'rgba(150,128,96,0.18)'; gg.lineWidth = 0.7;
+  for(let i=1;i<4;i++){ gg.beginPath(); gg.ellipse(0,0,r*i/4,ry*i/4,0,0,TAU); gg.stroke(); }
+  for(let a=0;a<12;a++){
+    gg.beginPath(); gg.moveTo(0,0);
+    gg.lineTo(Math.cos(a/12*TAU)*r, Math.sin(a/12*TAU)*ry);
+    gg.stroke();
+  }
+  // 濡れ色
+  if(wet > 0.04){
+    const wg = gg.createRadialGradient(0, ry*0.15+sag*0.3, r*0.1, 0, 0, r);
+    wg.addColorStop(0,'rgba(96,160,168,'+(wet*0.3)+')');
+    wg.addColorStop(1,'rgba(96,160,168,0)');
+    gg.fillStyle = wg; gg.fillRect(-r,-ry,r*2,ry*2+sag+10);
+  }
+  // ---- 破損は帯域内でも連続して進行する ----
+  // 85%: 白いほつれ線 / 65→45%: 中央の裂け目が伸びる / 45→25%: 縁からの2本目が伸びる
+  // 25→10%: 穴が開き縁が欠けていく / 10%〜: 欠けが深くなり、紙片が垂れる
+  const pv = Math.max(0, G.paper);
+  const lvl = pv > 85 ? 0 : pv > 65 ? 1 : pv > 45 ? 2 : pv > 25 ? 3 : pv > 10 ? 4 : 5;
+  // 帯域内の進行率 — 数値を見なくても紙面で「あと少しで破ける」が読める
+  const pr2 = pv > 65 ? 0 : pv > 45 ? (65-pv)/20 : pv > 25 ? (45-pv)/20 : pv > 10 ? (25-pv)/15 : (10-pv)/10;
+  const c1f = lvl >= 3 ? 1 : (lvl === 2 ? Math.max(0.12, pr2) : 0);
+  const c2f = lvl >= 4 ? 1 : (lvl === 3 ? Math.max(0.12, pr2) : 0);
+  if(lvl >= 1){
+    const rf = mulberry(31);
+    gg.strokeStyle = 'rgba(255,255,255,0.5)'; gg.lineWidth = 0.8;
+    for(let i=0;i<6;i++){
+      const bx = clamp((rf()*2-1)*0.9, -0.88, 0.88)*r;
+      const by = clamp((rf()*2-1)*0.82, -0.78, 0.78)*ry;
+      gg.beginPath(); gg.moveTo(bx,by);
+      gg.quadraticCurveTo(bx*0.86+rf()*3, by*0.86, bx*0.76, by*0.72);
+      gg.stroke();
+    }
+  }
+  if(lvl >= 2){
+    gg.save();
+    // 穴は暗色で塗るのではなく紙から除外し、下の水と金魚が透けて見える
+    gg.globalCompositeOperation = 'destination-out';
+    crackStroke(gg, CRACK1, r, ry, 2.6, c1f);
+    if(c2f > 0) crackStroke(gg, CRACK2, r, ry, 2.4, c2f);
+    if(lvl >= 4){
+      const holeP = lvl >= 5 ? 1 : pr2;
+      // 裂け目は太くなり、穴は帯域内で開いていく
+      crackStroke(gg, CRACK1, r, ry, 2.6 + 2.4*holeP, 1);
+      const HP = [[0.04,0.3],[0.2,0.44],[0.4,0.36],[0.52,0.2],[0.4,0.05],[0.2,0.14]];
+      const hcx = 0.3, hcy = 0.245, hs = 0.3 + 0.7*holeP;
+      gg.beginPath();
+      for(let i=0;i<HP.length;i++){
+        const X = (hcx + (HP[i][0]-hcx)*hs)*r, Y = (hcy + (HP[i][1]-hcy)*hs)*ry;
+        if(i === 0) gg.moveTo(X,Y); else gg.lineTo(X,Y);
+      }
+      gg.closePath(); gg.fill();
+      // 縁の欠けも25→10%で連続して広がる
+      const nR = r*(0.12 + 0.24*holeP);
+      gg.beginPath(); gg.ellipse(-r*0.86, ry*0.12, nR, nR*1.4, 0.3, 0, TAU); gg.fill();
+    }
+    if(lvl >= 5){
+      // 10%を切ると、欠けはさらに深く食い進む
+      const nR = r*(0.36 + 0.16*clamp(pr2,0,1));
+      gg.beginPath(); gg.ellipse(-r*0.86, ry*0.12, nR, nR*1.4, 0.3, 0, TAU); gg.fill();
+    }
+    gg.restore();
+    // 裂け目の縁には白い繊維がほつれる(裂け目と同じ長さだけ)
+    gg.strokeStyle = 'rgba(255,252,240,0.6)'; gg.lineWidth = 0.9;
+    crackStroke(gg, CRACK1, r, ry, 1, c1f);
+    if(c2f > 0) crackStroke(gg, CRACK2, r, ry, 1, c2f);
+  }
+  gg.restore();
+  // 縁が欠けた場所から、紙片が垂れて揺れる
+  if(lvl >= 5){
+    gg.save();
+    gg.translate(-r*0.66, ry*0.5);
+    gg.rotate(0.6 + Math.sin(G.t*2.4)*0.12);
+    gg.beginPath();
+    gg.moveTo(-r*0.12, 0);
+    gg.quadraticCurveTo(r*0.3, ry*0.12, r*0.2, ry*0.55);
+    gg.quadraticCurveTo(0, ry*0.42, -r*0.12, 0);
+    const flg = gg.createLinearGradient(0,0,0,ry*0.55);
+    flg.addColorStop(0,'rgba(235,224,198,0.95)');
+    flg.addColorStop(1,'rgba(205,192,164,0.85)');
+    gg.fillStyle = flg; gg.fill();
+    gg.restore();
+  }
+}
+function drawPoiRim(g, r, ry){
+  const warn = G.paper < 30;
+  g.beginPath(); g.ellipse(0,0,r,ry,0,0,TAU);
+  g.strokeStyle = warn ? 'rgba(255,126,96,'+(0.7+Math.sin(G.t*9)*0.25)+')' : '#dcb781';
+  g.lineWidth = 4.6; g.stroke();
+  g.strokeStyle = 'rgba(255,247,222,0.5)'; g.lineWidth = 1.3;
+  g.beginPath(); g.ellipse(0,-1.6,r-1,ry-1,0,Math.PI*1.05,Math.PI*1.95); g.stroke();
+  if(warn){
+    g.beginPath(); g.ellipse(0,0,r+7,ry+7,0,0,TAU);
+    g.strokeStyle = 'rgba(255,90,70,'+(0.2+Math.sin(G.t*9)*0.14)+')';
+    g.lineWidth = 2.4; g.stroke();
+  }
+}
 function drawPoi(g){
   const p = G.poi, r = p.r;
   const ry = r*0.78;
-  let nearest = 0;
+  const sag = clamp((p.sag||0) - (p.recoil||0), -7, 14);
+  let near = 0;
   if(G.mode === 'play'){
     for(let i=0;i<G.fish.length;i++){
       const f = G.fish[i];
       const d = Math.hypot(f.x-p.x, (f.y-p.y)/0.8);
-      if(d < r*0.64){ nearest = 1; break; }
+      if(d < r*0.67 && f.y > p.y+2){ near = 2; break; }   // 下位置の金魚: すくえる
+      if(d < r*0.64) near = 1;
     }
   }
   g.save();
   g.translate(p.x, p.y);
+  g.rotate(p.tilt||0);   // 荷重と暴れで、枠ごと傾く
 
   // handle
   g.strokeStyle = '#b98a55'; g.lineWidth = 5; g.lineCap = 'round';
@@ -1715,86 +2210,93 @@ function drawPoi(g){
   g.beginPath(); g.moveTo(r*0.72, r*0.46); g.lineTo(r*1.56, r*1.3); g.stroke();
   g.lineCap = 'butt';
 
-  // paper glow
-  if(nearest){
-    const gg = g.createRadialGradient(0,0,r*0.2,0,0,r*1.25);
-    gg.addColorStop(0,'rgba(255,226,150,0.26)');
+  // 紙の光 — すくえる下位置では強く脈打つ
+  if(near){
+    const strong = near === 2;
+    const gg = g.createRadialGradient(0,0,r*0.2,0,0,r*(strong?1.45:1.25));
+    gg.addColorStop(0,'rgba(255,226,150,'+(strong?0.42:0.26)+')');
     gg.addColorStop(1,'rgba(255,226,150,0)');
-    g.fillStyle = gg; g.beginPath(); g.ellipse(0,0,r*1.25,ry*1.25,0,0,TAU); g.fill();
-  }
-
-  const wet = 1 - G.paper/100;
-  g.beginPath(); g.ellipse(0,0,r,ry,0,0,TAU);
-  const pg = g.createRadialGradient(-r*0.3,-ry*0.3,r*0.1,0,0,r);
-  pg.addColorStop(0,'rgba(255,252,242,'+(0.94-wet*0.4)+')');
-  pg.addColorStop(1,'rgba(228,216,188,'+(0.86-wet*0.46)+')');
-  g.fillStyle = pg; g.fill();
-
-  g.save();
-  g.clip();
-  // bamboo mesh
-  g.strokeStyle = 'rgba(150,128,96,0.18)'; g.lineWidth = 0.7;
-  for(let i=1;i<4;i++){ g.beginPath(); g.ellipse(0,0,r*i/4,ry*i/4,0,0,TAU); g.stroke(); }
-  for(let a=0;a<12;a++){
-    g.beginPath(); g.moveTo(0,0);
-    g.lineTo(Math.cos(a/12*TAU)*r, Math.sin(a/12*TAU)*ry);
-    g.stroke();
-  }
-  // wet tint
-  if(wet > 0.04){
-    const wg = g.createRadialGradient(0, ry*0.15, r*0.1, 0, 0, r);
-    wg.addColorStop(0,'rgba(96,160,168,'+(wet*0.3)+')');
-    wg.addColorStop(1,'rgba(96,160,168,0)');
-    g.fillStyle = wg; g.fillRect(-r,-ry,r*2,ry*2);
-  }
-  // holes
-  if(G.paper < 64){
-    const holes = Math.floor((64-G.paper)/15) + 1;
-    const rnd = mulberry(4242);
-    for(let i=0;i<holes;i++){
-      const hx = (rnd()*1.5-0.75)*r, hy = (rnd()*1.3-0.65)*ry;
-      const hr = 2 + (1-G.paper/100)*7;
-      g.fillStyle = 'rgba(16,48,58,0.5)';
-      g.beginPath(); g.ellipse(hx,hy,hr,hr*0.72, rnd()*2, 0, TAU); g.fill();
+    g.fillStyle = gg; g.beginPath(); g.ellipse(0,0,r*(strong?1.45:1.25),ry*(strong?1.45:1.25),0,0,TAU); g.fill();
+    if(strong){
+      g.strokeStyle = 'rgba(255,214,120,'+(0.3+Math.sin(G.t*6)*0.15)+')';
+      g.lineWidth = 1.8;
+      g.beginPath(); g.ellipse(0,0,r+7,ry+6,0,Math.PI*0.12,Math.PI*0.88); g.stroke();
     }
   }
-  g.restore();
 
-  // rim
-  const warn = G.paper < 30;
-  g.beginPath(); g.ellipse(0,0,r,ry,0,0,TAU);
-  g.strokeStyle = warn ? 'rgba(255,126,96,'+(0.7+Math.sin(G.t*9)*0.25)+')' : '#dcb781';
-  g.lineWidth = 4.6; g.stroke();
-  g.strokeStyle = 'rgba(255,247,222,0.5)'; g.lineWidth = 1.3;
-  g.beginPath(); g.ellipse(0,-1.6,r-1,ry-1,0,Math.PI*1.05,Math.PI*1.95); g.stroke();
+  // 紙本体はスプライトに描いて貼る(穴の透過のため)
+  const SS = 2, pad = 16;
+  const sw = Math.ceil(r*2 + pad*2);
+  const sh = Math.ceil(ry*2 + pad + sag + 36);
+  if(poiSpr.width !== sw*SS || poiSpr.height !== sh*SS){ poiSpr.width = sw*SS; poiSpr.height = sh*SS; }
+  const sg2 = poiSpr.getContext('2d');
+  sg2.setTransform(SS,0,0,SS,0,0);
+  sg2.clearRect(0,0,sw,sh);
+  sg2.save();
+  sg2.translate(sw/2, ry+pad);
+  drawPaperSprite(sg2, r, ry, sag);
+  sg2.restore();
+  const oy = -(ry+pad);
 
-  if(warn){
-    g.beginPath(); g.ellipse(0,0,r+7,ry+7,0,0,TAU);
-    g.strokeStyle = 'rgba(255,90,70,'+(0.2+Math.sin(G.t*9)*0.14)+')';
-    g.lineWidth = 2.4; g.stroke();
-  }
   if(G.paper <= 0.5){
-    g.beginPath();
-    g.moveTo(-r*0.86, -ry*0.28);
-    g.lineTo(-r*0.5, -ry*0.08);
-    g.lineTo(-r*0.62, ry*0.12);
-    g.lineTo(-r*0.2, ry*0.02);
-    g.lineTo(0, ry*0.34);
-    g.lineTo(r*0.24, ry*0.06);
-    g.lineTo(r*0.56, ry*0.24);
-    g.lineTo(r*0.48, -ry*0.12);
-    g.lineTo(r*0.84, -ry*0.24);
-    g.strokeStyle = 'rgba(4,20,28,0.92)';
-    g.lineWidth = 5; g.lineJoin = 'round'; g.stroke();
-    g.strokeStyle = 'rgba(230,246,246,0.5)';
-    g.lineWidth = 1.4; g.stroke();
-    g.lineJoin = 'miter';
-    g.fillStyle = 'rgba(235,225,200,0.55)';
-    g.beginPath();
-    g.moveTo(r*0.2, ry*0.16);
-    g.quadraticCurveTo(r*0.52, ry*0.62, r*0.34, ry*0.9);
-    g.quadraticCurveTo(r*0.14, ry*0.52, r*0.2, ry*0.16);
-    g.fill();
+    // 破れ方は原因そのもの — 中央断裂 / 水草側から斜め剥がれ / 放射3片 / 溶けて垂れる
+    const k = clamp(G.breakT/0.55, 0, 1);
+    const cause = G.breakCause || 'weight';
+    const piece = function(clipFn, dx, dy, rot, al){
+      g.save();
+      clipFn(g);
+      g.save();
+      g.translate(dx, dy); g.rotate(rot);
+      g.globalAlpha = al;
+      g.drawImage(poiSpr, -sw/2, oy, sw, sh);
+      g.restore();
+      g.restore();
+    };
+    if(cause === 'water'){
+      // ふやけた紙は裂けない。中央から垂れて、溶けて消える
+      g.save();
+      g.translate(0, k*46);
+      g.scale(1 + k*0.08, 1 - k*0.3);
+      g.globalAlpha = 1 - k*0.8;
+      g.drawImage(poiSpr, -sw/2, oy, sw, sh);
+      g.restore();
+      g.save();
+      g.globalAlpha = clamp(1-k, 0, 1)*0.8;
+      g.fillStyle = 'rgba(220,208,182,0.9)';
+      g.beginPath();
+      g.moveTo(-r*0.34, ry*0.05);
+      g.quadraticCurveTo(-r*0.1, ry*0.7, -r*0.26, ry*0.05 + k*72);
+      g.lineTo(r*0.08, ry*0.05 + k*72);
+      g.quadraticCurveTo(r*0.2, ry*0.7, r*0.34, ry*0.05);
+      g.closePath(); g.fill();
+      g.restore();
+      g.globalAlpha = 1;
+      drawPoiRim(g, r, ry);
+    }else{
+      if(cause === 'weight'){
+        // 荷重に耐えきれず、真ん中から割れる
+        piece(function(gg){ gg.beginPath(); gg.rect(-r*3,-r*3,r*3,r*6); gg.clip(); }, -k*14, k*22, -0.6*k, 1 - k*0.1);
+        piece(function(gg){ gg.beginPath(); gg.rect(0,-r*3,r*3,r*6); gg.clip(); }, k*14, k*26, 0.6*k, 1 - k*0.1);
+      }else if(cause === 'plant'){
+        // 水草側の縁から、斜めへ剥がれていく
+        const s = G.breakSide || -1;
+        piece(function(gg){ gg.beginPath(); gg.moveTo(s*r*3,-r*3); gg.lineTo(-s*r*3,-r*3); gg.lineTo(-s*r*3,r*3); gg.closePath(); gg.clip(); }, -s*k*8, k*26, -s*0.3*k, 1 - k*0.1);
+        piece(function(gg){ gg.beginPath(); gg.moveTo(s*r*3,-r*3); gg.lineTo(-s*r*3,r*3); gg.lineTo(s*r*3,r*3); gg.closePath(); gg.clip(); }, s*k*28, k*4, s*0.9*k, 1 - k*0.25);
+      }else{
+        // 振り回しすぎて、放射状に3片が弾ける
+        for(let i=0;i<3;i++){
+          const x0 = -r*3 + i*(r*2);
+          const ang = (i-1)*0.52;
+          piece(function(gg){ gg.beginPath(); gg.rect(x0,-r*3,r*2+1,r*6); gg.clip(); },
+            Math.sin(ang)*k*48, k*18 + Math.abs(i-1)*k*12, ang*1.25, 1 - k*0.12);
+        }
+      }
+      g.globalAlpha = 1;
+      drawPoiRim(g, r, ry);
+    }
+  }else{
+    g.drawImage(poiSpr, -sw/2, oy, sw, sh);
+    drawPoiRim(g, r, ry);
   }
   g.restore();
 }
@@ -1877,16 +2379,21 @@ function drawWater(g){
 
   // poi + held
   drawPoi(g);
+  drawSnagVines(g);   // からまった水草の茎は、ポイの上へ伸びて食い込む
   for(let i=0;i<G.held.length;i++){
     const f = G.held[i];
-    drawFish(g, f, f.x, f.y, 1, 1, 0.9);
+    // 暴れが激しいほど、尾も体も激しく揺れる(0.9〜2.1)
+    const fury = clamp(Math.hypot(f.strX||0, f.strY||0)/16, 0, 1);
+    drawFish(g, f, f.x, f.y, 1, 1, 0.9 + fury*1.2);
   }
 
   // surface line
+  const wavesOn = !!(G.stage && G.stage.waves);
+  const ampMul = wavesOn ? 3 : 1;
   const sline = function(offset){
     g.beginPath();
     for(let x=x0;x<=x1;x+=10){
-      const yy = sy + offset + Math.sin(x*0.032 + G.t*1.7)*2.1 + Math.sin(x*0.013 - G.t*1.1)*1.5;
+      const yy = sy + offset + Math.sin(x*0.032 + G.t*1.7)*2.1*ampMul + Math.sin(x*0.013 - G.t*1.1)*1.5*ampMul;
       if(x===x0) g.moveTo(x,yy); else g.lineTo(x,yy);
     }
   };
@@ -1904,6 +2411,27 @@ function drawWater(g){
   g.strokeStyle = 'rgba(255,255,255,0.22)'; g.lineWidth = 1;
   sline(5); g.stroke();
   g.restore();
+
+  // 波紋の嵐: 流速に同期したうねりと白い泡が、水面を走る
+  if(wavesOn){
+    const swg = g.createLinearGradient(0,sy,0,sy+34);
+    swg.addColorStop(0,'rgba(130,225,238,0.20)');
+    swg.addColorStop(1,'rgba(130,225,238,0)');
+    g.fillStyle = swg;
+    g.fillRect(x0, sy, x1-x0, 34);
+    for(let x=x0; x<=x1; x+=18){
+      const c = Math.sin(x*0.032 + G.t*1.7);
+      if(c > 0.55){
+        const yy = sy + Math.sin(x*0.013 - G.t*1.1)*1.5*ampMul;
+        g.globalAlpha = (c-0.55)*1.5;
+        g.fillStyle = 'rgba(238,253,255,0.9)';
+        g.beginPath(); g.ellipse(x + Math.sin(G.t*3+x)*4, yy-1.5, 4.5+c*3.4, 1.7, 0, 0, TAU); g.fill();
+        g.globalAlpha = (c-0.55)*0.8;
+        g.beginPath(); g.ellipse(x+10, yy+3.5, 2.6, 1.1, 0, 0, TAU); g.fill();
+        g.globalAlpha = 1;
+      }
+    }
+  }
 
   // waterline wake from poi
   if(isSubmerged() && Math.hypot(G.poi.vx,G.poi.vy) > 24){
@@ -1974,6 +2502,29 @@ function drawPart(g, p){
   }else if(p.t === 'fly'){
     drawFish(g, {sp:p.sp, r:SPECIES[p.sp].r, size:p.size||1, held:true, vx:60, vy:0,
       phase:p.life*12, wag:16, patches:[], face:1, x:p.x, y:p.y}, p.x, p.y, 0.58, 1-k*0.1, 0.9);
+  }else if(p.t === 'shred'){
+    g.save();
+    g.translate(p.x, p.y);
+    g.rotate(p.rot);
+    g.globalAlpha = clamp((1-k)*1.6, 0, 1);
+    if(p.soggy){
+      // ふやけた紙は角が溶けた柔らかい塊になって、ゆっくり垂れる
+      g.fillStyle = 'rgba(214,204,178,0.82)';
+      g.beginPath();
+      g.ellipse(0, 0, p.w*0.7, p.h*0.6, 0, 0, TAU);
+      g.fill();
+      g.beginPath();
+      g.moveTo(-p.w*0.3, p.h*0.2);
+      g.quadraticCurveTo(0, p.h*1.5, p.w*0.3, p.h*0.3);
+      g.closePath(); g.fill();
+    }else{
+      g.fillStyle = 'rgba(238,228,202,0.95)';
+      g.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+      g.strokeStyle = 'rgba(178,166,138,0.7)'; g.lineWidth = 0.8;
+      g.strokeRect(-p.w/2, -p.h/2, p.w, p.h);
+    }
+    g.restore();
+    g.globalAlpha = 1;
   }
 }
 
@@ -2041,6 +2592,16 @@ function drawGameBowl(g){
 }
 
 function drawOverlay(g){
+  if(G.blackout > 0.01){
+    const p = G.poi;
+    const rad = Math.max(W,H)*0.5;
+    const dg = g.createRadialGradient(p.x, p.y, 18, p.x, p.y, rad);
+    dg.addColorStop(0,'rgba(2,3,10,0)');
+    dg.addColorStop(0.4,'rgba(2,3,10,'+(G.blackout*0.4)+')');
+    dg.addColorStop(1,'rgba(2,3,10,'+(G.blackout*0.9)+')');
+    g.fillStyle = dg;
+    g.fillRect(0,0,W,H);
+  }
   if(G.darkness > 0.01){
     const p = G.poi;
     const rad = Math.max(W,H)*0.42;
@@ -2279,6 +2840,11 @@ function goTitle(){
   G.fish = []; G.plants = []; G.held = []; G.parts = []; G.bubbles = [];
   G.paper = 100; G.caught = 0; G.timeLeft = 0;
   G.darkness = 0; G.flash = 0; G.shake = 0;
+  G.slowT = 0; G.hitstop = 0; G.breakT = 0;
+  G.blackout = 0; G.blackoutTarget = 0; G.bossSpawned = false; G.bossRef = null;
+  G.snagPlant = -1; G.bossDeposited = false; G.bossPrompt = false;
+  G.struggleX = 0; G.struggleY = 0; G.wasSub = false;
+  G.poi.sag = 0; G.poi.tilt = 0; G.poi.recoil = 0; G.poi.recoilV = 0;
   resetRun();
   resetPoi();
   spawnBubbles();
@@ -2305,7 +2871,7 @@ function shareResult(){
   }
   if(!counts) counts = '金魚0';
   const paper = $('resPaper').textContent;
-  let text = '金魚すくい偏差値'+dev+'で「'+title+'」でした。\n'+counts+'／最後のポイ紙 '+paper+'\n#ゲーム制作 #gamedev';
+  let text = '金魚すくい偏差値'+dev+'で「'+title+'」でした。\n'+counts+'／最後のポイ紙 '+paper+'／最多同時 '+G.maxCarry+'匹\n#ゲーム制作 #gamedev';
   if(text.length > 150) text = text.slice(0,150);
   let url = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text);
   const href = location.href.split('#')[0];
@@ -2355,6 +2921,7 @@ function loop(now){
 }
 
 loadBest();
+loadTitles();
 updateMuteIcon();
 computeLayout();
 goTitle();
