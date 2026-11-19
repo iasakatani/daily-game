@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>焼き魚の骨を、一本も折らずに食べろ。</title>
 <meta property="og:title" content="焼き魚の骨を、一本も折らずに食べろ。">
-<meta property="og:description" content="箸の圧ひとつで骨は折れる。焼き魚を骨格標本になるまで、骨を一本も折らずに食べきる6膳。皮を剥き、ほぐし、開き、鯛の鯛を探せ。完全度と折れた骨の部位がリザルトに並ぶ、静かな朝食ゲーム。">
+<meta property="og:description" content="箸の圧ひとつで骨は折れる。焼き魚を骨格標本になるまで食べきる6膳。皮を剥き、ほぐし、開き、鯛の鯛を探せ。完全な骨格は国宝となり、成層圏へ打ち上げられる朝食解体エンタメ。">
 <meta property="og:image" content="screenshot.png">
 <meta name="twitter:card" content="summary_large_image">
 <style>
@@ -122,7 +122,7 @@ var G={ scene:'title', t:0, timeScale:1, slow:0, anim:null, stage:0, fish:null, 
   combo:0, lastKill:-9, save:null, deltaAvg:0, deltaBrk:0, prevBestAvg:null, prevLeastBrk:null };
 var ZERO_PRAISED=false;
 function newRun(){
-  G.run={ records:[], taitaiFound:false, taitaiSwallowed:false, retries:0, curatorDone:false, firstSwallow:false, saved:false };
+  G.run={ records:[], taitaiFound:false, taitaiSwallowed:false, retries:0, curatorDone:false, breakCount:0, firstSwallow:false, saved:false };
 }
 function startRun(){ newRun(); startStage(0); }
 function resetPlay(si){
@@ -137,7 +137,7 @@ function fishProfile(t){ return Math.max(0.14,Math.pow(Math.sin(Math.PI*(0.10+0.
 function buildFish(si){
   var S=STAGES[si];
   var f={ S:S, si:si, N:S.N, R:S.R, side:0, flipT:0, angCur:0, angTo:0, rotT:-1, spineBreaks:[], ribBreaks:[],
-          swallowed:0, pulledCount:0, skinClean:0, skinTorn:0, _sg:null, split:0, splitT:0, spreadCur:0, flexDir:1, pullFlex:0, taitaiCol:-1 };
+          swallowed:0, pulledCount:0, skinClean:0, skinTorn:0, _sg:null, split:0, splitT:0, spreadCur:0, flexDir:1, pullFlex:0, taitaiCol:-1, fossilT:0, misoWarn:false };
   f.cells=[]; f.segs=[]; f.ribs=[]; f.smallbones=[]; f.taitai=null;
   fishGeom(f);
   var colW=f.fishLen/f.N, rW=f.fishLen/(f.N-1);
@@ -342,9 +342,9 @@ function burst(wpos,n,col){
                   life:rnd(0.4,0.9), t:0, size:rnd(2,5), col:col, grav:180});
   if(G.parts.length>320) G.parts.splice(0,G.parts.length-320);
 }
-function steam(wpos){
-  G.steams.push({x:wpos.x, y:wpos.y, t:0, life:rnd(1.4,2.4), dr:rnd(-8,8)});
-  if(G.steams.length>40) G.steams.shift();
+function steam(wpos,col,big){
+  G.steams.push({x:wpos.x, y:wpos.y, t:0, life:rnd(1.4,2.4), dr:rnd(-8,8), col:col||'#fff', big:!!big});
+  if(G.steams.length>60) G.steams.shift();
 }
 function museumLabel(text){ G.label=text; G.labelT=0; }
 function shake(a){ G.shake=Math.max(G.shake,a); }
@@ -368,40 +368,33 @@ function spawnOpenFibers(f,lx){
   if(G.fibers.length>70) G.fibers.splice(0,G.fibers.length-70);
 }
 function liftFlakes(f,c){
-  var wp=l2w(f,c.x,c.y), n=2+Math.min(G.combo,10)*0.3;
+  var wp=l2w(f,c.x,c.y), boost=G.combo>=10?2:(G.combo>=6?1.5:1), n=(2+Math.min(G.combo,10)*0.3)*boost;
   for(var i=0;i<n;i++)
-    G.parts.push({x:wp.x+rnd(-4,4), y:wp.y+rnd(-3,3), vx:rnd(-28,28), vy:-rnd(60,120), rot:rnd(0,TAU), vr:rnd(-6,6),
-                  life:rnd(0.5,0.9), t:0, size:rnd(2.5,5.5), col:(Math.random()<0.5)?'#d9a96a':'#f3e2c0', grav:240});
+    G.parts.push({x:wp.x+rnd(-4,4), y:wp.y+rnd(-3,3), vx:rnd(-28,28)*boost, vy:-rnd(60,120)*boost, rot:rnd(0,TAU), vr:rnd(-6,6),
+                  life:rnd(0.5,0.9), t:0, size:rnd(2.5,5.5)*boost, col:(Math.random()<0.5)?'#d9a96a':'#f3e2c0', grav:240});
 }
 function comboKill(){
   if(G.t-G.lastKill>1.1) G.combo=0;
   G.lastKill=G.t; G.combo++;
-  if(G.combo===3||G.combo===6||G.combo===10){
-    var txt=G.combo===3?'ほぐれる':(G.combo===6?'骨が見えた':'完食の気配');
-    popup(txt, {x:G.tip.x,y:G.tip.y-26}, 16, '#fff3d8', 1.1);
-    sCombo(G.combo); steam({x:G.tip.x,y:G.tip.y});
-    for(var i=0;i<4;i++)
-      G.parts.push({x:G.tip.x+rnd(-8,8), y:G.tip.y, vx:rnd(-40,40), vy:-rnd(70,130), rot:rnd(0,TAU), vr:rnd(-6,6),
-        life:rnd(0.4,0.8), t:0, size:rnd(2,4.5), col:'#f3e2c0', grav:220});
+  if(G.combo===3||G.combo===6||G.combo===10||G.combo===15){
+    var txt=G.combo===3?'ほぐしの呼吸':(G.combo===6?'骨透視（レントゲン開眼）':(G.combo===10?'超音速・縄文解体':'光速箸（朝食の向こう側）'));
+    popup(txt,{x:W/2,y:H*0.27},18+Math.min(10,G.combo*0.65),'#ffe082',1.8); shake(G.combo>=10?9:4); flash('#ffd75e',0.12);
+    sCombo(Math.min(G.combo,12)); steam({x:G.tip.x,y:G.tip.y},'#ffd76a',true);
+    for(var i=0;i<4+G.combo;i++) G.parts.push({x:G.tip.x+rnd(-8,8),y:G.tip.y,vx:rnd(-70,70),vy:-rnd(70,170),rot:rnd(0,TAU),vr:rnd(-8,8),life:rnd(0.5,1),t:0,size:rnd(2,5.5),col:'#ffe49a',grav:220});
   }
 }
 function curatorBreak(){
-  if(G.run.curatorDone) return;
-  G.run.curatorDone=true;
-  G.curator={text:'本日の朝食は、本日の事故現場となりました。', t:0, life:1.8};
-  toneAt(150,0.4,'triangle',0.07,0,90); }
+  G.run.curatorDone=true; G.run.breakCount++;
+  var n=G.run.breakCount, txt=n===1?'【緊急速報】本日の朝食は、ただいま事故現場となりました。':(n===2?'【警報】執刀医（箸）が暴走中！！魚が原形を失いつつあります！！':'【大惨事】朝食会場が解体工事現場に指定されました！！');
+  G.curator={text:txt,t:0,life:2.5}; toneAt(150,0.4,'sawtooth',0.09,0,70); shake(n>=3?12:6);
+}
 function killCell(f,c){
   c.alive=false; c.hp=0; f.aliveCount--;
   spawnFibers(f,c); liftFlakes(f,c); sPeel(); comboKill();
-  if(c.row===0){ // 身ごと強引に剥がした → 皮は不規則な裂け残りになる
+  if(c.row===0){ // 隣接剥離・直接剥離のどちらでも、現在の箸圧で皮の結末を一本化
     var sk2=f.skins[c.side][c.col];
-    if(sk2&&sk2.alive){
-      sk2.alive=false; sk2.torn=true; f.skinTorn++; sRibcrack();
-      var wp2=l2w(f,c.x,c.y);
-      if(Math.random()<0.3){ popup('皮ごといった…',wp2,14,'#c98a5a',0.9); shake(3); }
-      for(var i2=0;i2<3;i2++)
-        G.parts.push({x:wp2.x+rnd(-5,5), y:wp2.y, vx:rnd(-35,35), vy:-rnd(30,80), rot:rnd(0,TAU), vr:rnd(-6,6),
-          life:rnd(0.4,0.8), t:0, size:rnd(2,4), col:'#3c2210', grav:250}); } }
+    if(sk2&&sk2.alive) skinDeath(f,sk2);
+  }
   if(c.small>=0){
     var b=f.smallbones[c.small];
     if(b&&b.state==='in'){ b.state='gone'; swallowBone(f,b); } }
@@ -482,11 +475,13 @@ function nearestRib(f,si,side){
     if(d<bd){ bd=d; best=rb; } }
   return best; }
 function finishOpen(f){
-  G.openDrag=null; f.split=1; f.splitT=1;
-  sBoneHit(); shake(5);
-  popup('開いた。上下の身が、分かれた。', {x:W/2,y:H*0.40}, 18, '#f3ead2', 1.4);
-  burst(l2w(f,0,0), 14, '#efe6cf');
-  for(var i=2;i<f.N-2;i+=3) spawnOpenFibers(f,f.segs[i].x); }
+  G.openDrag=null; f.split=1; f.splitT=1; G.anim=null;
+  sBoneHit(); shake(12); flash('#ffd35a',0.28);
+  popup('封印されし北海道の覇気、解放！！',{x:W/2,y:H*0.34},24,'#ffd65e',2.2);
+  burst(l2w(f,0,0),24,'#ffd36a');
+  for(var i=0;i<10;i++) steam(l2w(f,lerp(-f.fishLen*0.35,f.fishLen*0.35,i/9),rnd(-8,8)),'#ffd76a',true);
+  for(var j=2;j<f.N-2;j+=3) spawnOpenFibers(f,f.segs[j].x);
+}
 function updatePlay(dt){
   var f=G.fish, S=f.S, L=layout();
   if(G.anim==='rot'){
@@ -495,13 +490,11 @@ function updatePlay(dt){
     else f.angCur=lerp(f.angFrom,f.angTo,ease(f.rotT)); }
   if(G.anim==='flip'){
     f.flipT+=dt/0.6;
-    if(f.flipT>=1){ f.side=1-f.side; f.flipT=0; G.anim=null; sBoneHit(); } }
+    if(f.flipT>=1){ f.side=1-f.side; f.flipT=0; f.fossilT=1.35; G.anim=null; sBoneHit(); shake(7); flash('#9ffff0',0.2); popup('古代化石、ここに顕現。',{x:L.cx,y:L.cy-f.hMax*2},18,'#baffdf',1.4); } }
   if(G.anim==='open'){
     f.splitT+=dt/0.9;
-    if(f.splitT>=1){ f.splitT=1; f.split=1; G.anim=null; sBoneHit(); shake(5);
-      popup('開いた。上下の身が、分かれた。', {x:W/2,y:H*0.40}, 18, '#f3ead2', 1.4);
-      burst({x:L.cx,y:L.cy}, 14, '#efe6cf'); }
-    else f.split=ease(f.splitT); }
+    if(f.splitT>=1) finishOpen(f); else f.split=ease(f.splitT); }
+  f.fossilT=Math.max(0,f.fossilT-dt);
   // 開きドラッグ(切れ目が指に追従・繊維が伸びてちぎれる・抵抗を返す)
   if(G.openDrag){
     var od=G.openDrag, tlO=w2l(G.ptr.x,G.ptr.y);
@@ -532,8 +525,10 @@ function updatePlay(dt){
   if(S.slip&&G.pressed&&!G.pull&&!G.anim){
     var pl=w2l(G.ptr.x,G.ptr.y), sf=(pl.x>0)?1:0.3;
     G.slipX=Math.min(85,G.slipX+dt*(18+72*G.P)*sf);
+    if(G.slipX>24&&!f.misoWarn){ f.misoWarn=true; popup('味噌マグマに箸が飲まれる！',{x:L.cx,y:L.cy-L.plateR*0.55},22,'#ff9b45',2); shake(8); }
     if(G.P>0.3&&Math.random()<dt*6) burst({x:G.tip.x,y:G.tip.y+6},1,'#7a4520');
   } else G.slipX=Math.max(0,G.slipX-dt*300);
+  if(G.combo>=6&&G.pressed&&Math.random()<dt*24) G.parts.push({x:G.tip.x+rnd(-14,14),y:G.tip.y+rnd(-10,10),vx:rnd(-90,90),vy:rnd(-90,40),rot:rnd(0,TAU),vr:8,life:rnd(0.25,0.55),t:0,size:rnd(2,4),col:'#ffe16b',grav:80});
   // 箸先(弱圧で急に動かすと、指より遅れて身が滑る)
   var tgx=G.ptr.x+Math.cos(f.angCur)*G.slipX, tgy=G.ptr.y+Math.sin(f.angCur)*G.slipX;
   var ox=G.tip.x, oy=G.tip.y, rate=(G.pressed&&!G.anim)?(5.5+8.5*G.P):16;
@@ -810,12 +805,19 @@ function update(dt){
     var lim=(G.zeroPraise?2.05:1.55); // 零傷賛辞テロップ(1.8秒)を膳間メッセージにかぶせない
     if(G.clearT>lim){
       G.zeroPraise=false;
-      if(G.stage>=5){ G.scene='taitai'; G.taitaiT=0; G.taitaiSkip=false; G.taitaiBell=false; sDrone(); if(G.run.taitaiFound) sTaitai(); }
+      if(G.stage>=5){ G.scene='taitai'; G.taitaiT=0; G.taitaiSkip=false; G.taitaiBell=false; G.taitaiFx=0; sDrone(); if(G.run.taitaiFound) sTaitai(); }
       else G.scene='inter'; }
   } else if(G.scene==='taitai'){
     G.taitaiT+=dt;
-    var limit=(G.run.taitaiFound?3.6:2.0);
+    var limit=(G.run.taitaiFound?7.2:4.8);
     if(G.taitaiSkip) G.taitaiT=limit+1;
+    if(!G.taitaiSkip&&G.run.taitaiFound){
+      if(G.taitaiT>=0.85&&!(G.taitaiFx&1)){ G.taitaiFx|=1; shake(18); flash('#fff7c2',0.8); noiseAt(0.5,1800,0.2); sTaitai(); }
+      if(G.taitaiT>=1.35&&!(G.taitaiFx&2)){ G.taitaiFx|=2; shake(14); flash('#ffd12e',0.5); sClear(); }
+      if(G.taitaiT>=3&&!(G.taitaiFx&4)){ G.taitaiFx|=4; shake(18); toneAt(70,1.8,'sawtooth',0.18,0,420); noiseAt(1.5,240,0.18); }
+      if(G.taitaiT>1.3&&G.taitaiT<5) for(var cf=0;cf<3;cf++) G.parts.push({x:W/2+rnd(-45,45),y:H*0.43,vx:rnd(-240,240),vy:rnd(-280,-40),rot:rnd(0,TAU),vr:rnd(-12,12),life:rnd(1,2),t:0,size:rnd(3,8),col:['#ffd426','#fff3bf','#e84b32','#7ce6dc'][cf%4],grav:210});
+    } else if(!G.taitaiSkip&&G.taitaiT>=0.7&&!(G.taitaiFx&1)){ G.taitaiFx|=1; shake(18); flash('#e31313',0.65); noiseAt(0.8,160,0.2); toneAt(90,1.2,'sawtooth',0.13,0,42); }
+    if(!G.taitaiSkip&&!G.run.taitaiFound&&G.taitaiT>0.7) G.shake=Math.max(G.shake,3+3*Math.abs(Math.sin(G.taitaiT*18)));
     if(G.taitaiT>limit){ G.scene='result'; if(!G.run.saved){ G.run.saved=true; commitSave(); } } }
   if(G.scene==='result'&&!G.run.saved){ G.run.saved=true; commitSave(); }
 }
@@ -895,6 +897,8 @@ function drawBrothLocal(L){
   X.fillStyle=jg; X.fillRect(0,-L.plateR*0.52,L.plateR*0.8,L.plateR*1.05);
   X.fillStyle='rgba(160,110,50,0.35)';
   X.beginPath(); X.ellipse(L.plateR*0.62,wob*0.4,L.plateR*0.2,L.plateR*0.13,wob*0.01,0,TAU); X.fill();
+  for(var i=0;i<16;i++){ var ph=(G.t*(0.35+cellHash(i,2)*0.6)+cellHash(i,5))%1, bx=L.plateR*(0.12+cellHash(i,7)*0.72), by=L.plateR*(cellHash(i,9)*0.7-0.35)-ph*12;
+    X.strokeStyle='rgba(255,174,72,'+(0.25+0.6*(1-ph))+')'; X.lineWidth=1.2; X.beginPath(); X.arc(bx,by,1.5+cellHash(i,4)*4+ph*2,0,TAU); X.stroke(); }
   X.restore();
 }
 function pilePos(){ var L=layout(); return {x:L.cx-L.plateR*0.66, y:L.cy+L.plateR*0.4}; }
@@ -953,6 +957,12 @@ function drawFishAll(L){
     if(Math.abs(sm)<0.02) sm=0.02;
     X.scale(1,sm);
   }
+  if(S.taitai){
+    X.save(); X.shadowColor='#ffd441'; X.shadowBlur=15; X.strokeStyle='rgba(255,211,65,'+(0.45+0.25*Math.sin(G.t*6))+')'; X.lineWidth=3; fishPath(f); X.stroke(); X.shadowBlur=0;
+    for(var au=0;au<22;au++){ var ap=(au/22+G.t*(0.035+(au%3)*0.008))%1, ax=lerp(-f.fishLen*0.58,f.fishLen*0.57,ap), ay=Math.sin(au*2.4+G.t*2)*f.hMax*(0.7+cellHash(au,3)*0.8);
+      X.fillStyle='rgba(255,222,84,'+(0.35+0.55*cellHash(au,8))+')'; X.beginPath(); X.arc(ax,ay,1.5+cellHash(au,4)*2.5,0,TAU); X.fill(); }
+    X.restore();
+  }
   var drawnSide0=S.flip?(f.flipT<0.5? f.side:1-f.side):0;
   var drawnSides=S.flip?[drawnSide0]:[0,1];
   // 身(共通輪郭にクリップされた、隙間のない升目・色は膳ごと16段階キャッシュ)
@@ -974,6 +984,12 @@ function drawFishAll(L){
     }
     X.fillStyle=col;
     X.fillRect(c.x-c.w/2,cy-ch/2,c.w+0.5,ch);
+    // 筋節ごとのV字身割れと脂の照りで、平たい升目ではなく焼き魚の円みを描く
+    var vph=cellHash(c.col*3+c.row,c.side), vv=(vph-0.5)*ch*0.18;
+    X.strokeStyle='rgba(91,48,19,0.32)'; X.lineWidth=Math.max(0.8,1.15*f.sc); X.beginPath();
+    X.moveTo(c.x-c.w*0.43,cy-ch*0.36+vv); X.quadraticCurveTo(c.x-c.w*0.1,cy+ch*0.02,c.x,cy+ch*0.34+vv); X.quadraticCurveTo(c.x+c.w*0.15,cy+ch*0.02,c.x+c.w*0.43,cy-ch*0.36+vv); X.stroke();
+    X.strokeStyle='rgba(255,239,190,0.32)'; X.lineWidth=0.8; X.beginPath(); X.moveTo(c.x-c.w*0.34,cy-ch*0.27+vv); X.lineTo(c.x,cy+ch*0.22+vv); X.lineTo(c.x+c.w*0.34,cy-ch*0.27+vv); X.stroke();
+    if(c.row===0){ var fy=cy+(c.side===0?-1:1)*ch*0.39; X.strokeStyle='rgba(255,238,174,0.55)'; X.lineWidth=1.4; X.beginPath(); X.moveTo(c.x-c.w*0.42,fy); X.quadraticCurveTo(c.x,fy-(c.side===0?-1:1)*2,c.x+c.w*0.4,fy); X.stroke(); }
     // dmg段階進行: 0.25白筋 → 0.6裂け目 → 0.85骨まで届く欠損
     if(dmg>0.25){
       var ph=cellHash(c.col,c.row);
@@ -1018,6 +1034,12 @@ function drawFishAll(L){
     X.stroke();
   }
   drawBones(f,drawnSides);
+  if(f.fossilT>0){
+    var fp=spinePts(f), fa=clamp(f.fossilT,0,1); X.save(); X.globalAlpha=fa; X.shadowColor='#8ffff0'; X.shadowBlur=14; X.strokeStyle='#b9ffe0'; X.lineWidth=2;
+    X.beginPath(); for(var fi2=0;fi2<fp.length;fi2++){ if(fi2===0) X.moveTo(fp[fi2].x,fp[fi2].y); else X.lineTo(fp[fi2].x,fp[fi2].y); } X.stroke();
+    for(var fj=1;fj<f.N-1;fj++){ var fh=hwRaw(f,f.segs[fj].x)*0.8; X.beginPath(); X.moveTo(f.segs[fj].x,0); X.lineTo(f.segs[fj].x+5,-fh); X.moveTo(f.segs[fj].x,0); X.lineTo(f.segs[fj].x+5,fh); X.stroke(); }
+    X.restore();
+  }
   drawSkinBands(f,drawnSides);
   var headAlive=0, tailAlive=0;
   for(var k2=0;k2<f.cells.length;k2++){
@@ -1041,9 +1063,11 @@ function drawFishAll(L){
     X.strokeStyle='rgba(30,18,8,0.5)'; X.lineWidth=1.2;
     X.beginPath(); X.moveTo(f.xs[0]+Fl*0.045,hSides[0]*hwv*0.75);
     X.quadraticCurveTo(f.xs[0]+Fl*0.02,0,f.xs[0]+Fl*0.045,hSides[hSides.length-1]*hwv*0.75); X.stroke();
-    if(!(S.flip&&drawnSide0===1)){ // 眼(白身側にはない)
-      X.fillStyle='#e8e0cc'; X.beginPath(); X.arc(f.xs[0]-Fl*0.012,hSides[0]*hwv*0.5,3.1*f.sc,0,TAU); X.fill();
-      X.fillStyle='#1a120a'; X.beginPath(); X.arc(f.xs[0]-Fl*0.012,hSides[0]*hwv*0.5,1.5*f.sc,0,TAU); X.fill();
+    if(!(S.flip&&drawnSide0===1)){ // 中骨折損で頭骨の目が白目を剥いて×になる
+      var ex=f.xs[0]-Fl*0.012, ey=hSides[0]*hwv*0.5, shocked=f.spineBreaks.length>0;
+      X.fillStyle=shocked?'#fff':'#e8e0cc'; X.beginPath(); X.arc(ex,ey,(shocked?4.6:3.1)*f.sc,0,TAU); X.fill();
+      if(shocked){ X.strokeStyle='#b51f18'; X.lineWidth=1.8; X.beginPath(); X.moveTo(ex-3*f.sc,ey-3*f.sc); X.lineTo(ex+3*f.sc,ey+3*f.sc); X.moveTo(ex+3*f.sc,ey-3*f.sc); X.lineTo(ex-3*f.sc,ey+3*f.sc); X.stroke(); }
+      else { X.fillStyle='#1a120a'; X.beginPath(); X.arc(ex,ey,1.5*f.sc,0,TAU); X.fill(); }
     }
   }
   if(tailAlive>2){
@@ -1209,8 +1233,9 @@ function drawBones(f,drawnSides){
     var hp=pts[0];
     X.fillStyle='rgba(248,242,225,'+(0.3+0.6*headExpo)+')';
     X.beginPath(); X.ellipse(hp.x-4*f.sc,hp.y,12*f.sc,8.5*f.sc,0,0,TAU); X.fill();
-    X.fillStyle='rgba(30,22,14,'+(0.6*headExpo)+')';
-    X.beginPath(); X.arc(hp.x-6*f.sc,hp.y-3*f.sc,2.4,0,TAU); X.fill();
+    X.fillStyle=f.spineBreaks.length?'#fff':'rgba(30,22,14,'+(0.6*headExpo)+')';
+    X.beginPath(); X.arc(hp.x-6*f.sc,hp.y-3*f.sc,2.8,0,TAU); X.fill();
+    if(f.spineBreaks.length){ X.strokeStyle='#b51f18'; X.lineWidth=1.2; X.beginPath(); X.moveTo(hp.x-8*f.sc,hp.y-5*f.sc); X.lineTo(hp.x-4*f.sc,hp.y-f.sc); X.moveTo(hp.x-4*f.sc,hp.y-5*f.sc); X.lineTo(hp.x-8*f.sc,hp.y-f.sc); X.stroke(); }
     X.strokeStyle='rgba(248,242,225,'+(0.3+0.5*headExpo)+')'; X.lineWidth=1.4;
     X.beginPath(); X.moveTo(hp.x+4*f.sc,hp.y-6*f.sc); X.lineTo(hp.x-11*f.sc,hp.y-8.5*f.sc);
     X.moveTo(hp.x+4*f.sc,hp.y+6*f.sc); X.lineTo(hp.x-11*f.sc,hp.y+8.5*f.sc); X.stroke();
@@ -1234,8 +1259,12 @@ function rrectPath(x,y,w,h,r){
 }
 var DIMPC={};
 function drawChopsticks(L){
-  var tip=G.tip;
+  var tip=G.tip, S=STAGES[G.stage], lo=S.sweetLo, hi=S.sweetHi;
   if(tip.x<-50||tip.y<-50) return;
+  if(G.combo>=6){
+    X.save(); X.strokeStyle='rgba(255,196,45,'+(0.2+0.1*Math.sin(G.t*12))+')'; X.lineWidth=1.4;
+    for(var cl=0;cl<14;cl++){ var cy0=(cl*67+G.t*170)%H, reach=28+cellHash(cl,4)*65; X.beginPath(); X.moveTo(0,cy0); X.lineTo(reach,cy0+(H/2-cy0)*0.08); X.moveTo(W,cy0); X.lineTo(W-reach,cy0+(H/2-cy0)*0.08); X.stroke(); } X.restore();
+  }
   var sink=G.P*7+G.pressKick*3.5, tx=tip.x, ty=tip.y+sink*0.7;
   if(G.openDrag){ tx+=rnd(-1.8,1.8); ty+=rnd(-1.4,1.4); } // 開き中、箸は抵抗に震える
   var onPlate=Math.hypot(tip.x-L.cx,(tip.y-L.cy)/0.6)<L.plateR;
@@ -1247,16 +1276,19 @@ function drawChopsticks(L){
       DIMPC[kb]=dg; }
     X.save(); X.translate(tx,ty); X.fillStyle=DIMPC[kb];
     X.beginPath(); X.ellipse(0,0,(20+kb*1.2),(13+kb*0.8)*0.7,0,0,TAU); X.fill(); X.restore(); }
+  if(G.combo>=6){ X.save(); X.shadowColor='#ffd52f'; X.shadowBlur=16; X.strokeStyle='#ffe26c'; X.lineWidth=2.5; X.beginPath(); X.arc(tx,ty,20+Math.sin(G.t*15)*2,G.t*5,G.t*5+Math.PI*1.5); X.stroke(); X.beginPath(); X.arc(tx,ty,25,-G.t*4,-G.t*4+Math.PI); X.stroke(); X.restore(); }
   if(G.P>0.05){
-    var zoneCol=(G.P<0.36)?'rgba(255,255,255,0.5)':(G.P<=0.78?'rgba(255,220,140,0.7)':'rgba(255,90,60,0.85)');
+    var zoneCol=(G.P<lo)?'rgba(255,255,255,0.5)':(G.P<=hi?'rgba(255,220,140,0.7)':'rgba(255,90,60,0.85)');
     X.strokeStyle=zoneCol; X.lineWidth=2;
     X.beginPath(); X.arc(tx,ty,15,-Math.PI/2,-Math.PI/2+TAU*G.P); X.stroke();
-    if(G.P>0.78){
+    X.strokeStyle='rgba(40,25,12,0.9)'; X.lineWidth=1.5;
+    for(var zi=0;zi<2;zi++){ var za=-Math.PI/2+TAU*(zi===0?lo:hi); X.beginPath(); X.moveTo(tx+Math.cos(za)*11,ty+Math.sin(za)*11); X.lineTo(tx+Math.cos(za)*20,ty+Math.sin(za)*20); X.stroke(); }
+    if(G.P>hi){
       X.fillStyle='rgba(255,90,60,'+(0.5+0.3*Math.sin(G.t*14))+')';
       X.font='700 12px '+SANS; X.textAlign='center'; X.fillText('み…',tx+22,ty-14); } }
   var bx=tx+120, by=ty+150, bend=3+6*G.P+(G.openDrag?4:0);
   X.lineCap='round';
-  X.strokeStyle=(G.P>0.78)?'#c46a3a':'#b98c4a'; X.lineWidth=5.5;
+  X.strokeStyle=(G.P>hi)?'#c46a3a':'#b98c4a'; X.lineWidth=5.5;
   X.beginPath(); X.moveTo(bx,by); X.quadraticCurveTo((bx+tx)/2+6,(by+ty)/2+bend,tx+1,ty+1); X.stroke();
   X.strokeStyle='#a3762f';
   X.beginPath(); X.moveTo(bx+16,by+14); X.quadraticCurveTo((bx+16+tx)/2+8,(by+14+ty)/2+bend+2,tx+4,ty+2.5); X.stroke();
@@ -1294,7 +1326,7 @@ function drawPlayHUD(){
     X.fillStyle=G._openReady?'rgba(122,60,20,0.95)':'rgba(96,84,64,0.85)';
     X.fillText(G._openReady?'中骨が覗いた — 押さえて、頭か尾へ引き開けろ':'中央の身を、もう少し剥がす(開くのはまだ早い)',W/2,H-34); }
   if(f&&f.S.slip&&G.slipX>10){
-    X.font='700 11px '+SANS; X.textAlign='center'; X.fillStyle='rgba(150,80,30,0.85)'; X.fillText('煮汁に流されている…',G.tip.x,G.tip.y+34); } }
+    X.font='700 11px '+SANS; X.textAlign='center'; X.fillStyle='rgba(150,80,30,0.85)'; X.fillText('味噌マグマに箸が飲まれる！',G.tip.x,G.tip.y+34); } }
 function drawCurator(){
   var c=G.curator; if(!c) return;
   var a=clamp(c.t*6,0,1)*clamp((c.life-c.t)*3,0,1);
@@ -1307,7 +1339,7 @@ function drawCurator(){
   X.moveTo(W*0.06,H*0.40+54); X.lineTo(W*0.94,H*0.40+54);
   X.stroke();
   X.textAlign='center'; X.textBaseline='middle';
-  X.font='600 14px '+SERIF; X.fillStyle='#efe2c4'; X.fillText(c.text,W/2,H*0.40+20);
+  X.font='600 '+Math.min(16,Math.max(7,(W-20)/Math.max(24,c.text.length)))+'px '+SERIF; X.fillStyle='#efe2c4'; X.fillText(c.text,W/2,H*0.40+20);
   X.font='600 9px '+SANS; X.fillStyle='rgba(190,160,100,0.9)'; X.fillText('— 標本室 館長',W/2,H*0.40+40);
   X.restore(); X.textBaseline='alphabetic'; }
 function box(x,y,w,h,r,fillCol,strokeCol,lw){
@@ -1460,34 +1492,40 @@ function drawClearingAnim(){
   X.restore();
 }
 function drawTaitai(){
-  X.fillStyle='#0d0b09'; X.fillRect(0,0,W,H);
-  var cx=W/2, cy=H*0.44, rec=G.run.records[5], S=STAGES[5], t=G.taitaiT;
-  var a=clamp(t*1.5,0,1);
-  X.save(); X.globalAlpha=a;
-  var rise=(G.run.taitaiFound&&t>1.7)?Math.sin(clamp((t-1.7)/0.9,0,1)*Math.PI)*10:0;
-  var bowA=(G.run.taitaiFound&&t>1.9&&t<2.8)?Math.sin(clamp((t-1.9)/0.9,0,1)*Math.PI)*0.09:0;
-  X.translate(cx,cy-rise); X.rotate(bowA);
-  drawSpecimen(0,0,Math.min(W*0.7,320),Math.min(W*0.7,320)*0.36,S,rec,false);
-  X.restore();
-  if(G.run.taitaiFound){
-    if(t>0.6&&t<1.5){
-      var e=clamp((t-0.6)/0.9,0,1);
-      drawTaiTai(lerp(cx-60,cx-Math.min(W*0.7,320)*0.43,ease(e)),lerp(cy+H*0.16,cy,ease(e))-10,9,'#f5edc9'); }
-    if(t>=1.5) drawTaiTai(cx-Math.min(W*0.7,320)*0.43+4,cy-6,8,'rgba(245,237,201,'+clamp((t-1.5)*4,0,1)+')');
-    if(t>1.5&&t<1.9&&Math.random()<0.4) burst({x:cx-Math.min(W*0.7,320)*0.43,y:cy-8},2,'#fff0b8');
-    if(t>1.85&&t<1.95&&!G.taitaiBell){ G.taitaiBell=true; sBoneHit(); }
-    X.textAlign='center';
-    X.font='700 20px '+SERIF; X.fillStyle='rgba(240,225,190,'+a+')';
-    if(t>1.9) X.fillText('鯛の鯛、標本に収まる。',cx,cy+H*0.22);
-    if(t>2.6){ X.font='700 16px '+SERIF; X.fillStyle='rgba(240,225,190,'+clamp((t-2.6)*2,0,1)+')'; X.fillText('一礼。',cx,cy-H*0.24); }
-    if(t>2.9){
-      var fa=clamp((t-2.9)/0.7,0,1), fw=Math.min(W*0.7,320)*0.62*fa, fh=fw*0.5;
-      X.strokeStyle='rgba(184,150,63,'+(0.4+0.6*fa)+')'; X.lineWidth=3; X.strokeRect(cx-fw,cy-fh,fw*2,fh*2); }
+  var found=G.run.taitaiFound, t=G.taitaiT, cx=W/2, cy=H*0.44, rec=G.run.records[5], S=STAGES[5], sw=Math.min(W*0.7,320);
+  X.fillStyle=found?'#090703':'#100000'; X.fillRect(0,0,W,H);
+  if(found){
+    var rg=X.createRadialGradient(cx,cy,10,cx,cy,Math.max(W,H)*0.7); rg.addColorStop(0,'rgba(255,177,20,0.38)'); rg.addColorStop(1,'rgba(0,0,0,0)'); X.fillStyle=rg; X.fillRect(0,0,W,H);
+    X.save(); X.strokeStyle='rgba(255,208,54,0.42)'; X.lineWidth=2;
+    for(var i=0;i<36;i++){ var an=i*TAU/36+G.t*0.08, r0=55+((i*17)%50); X.beginPath(); X.moveTo(cx+Math.cos(an)*r0,cy+Math.sin(an)*r0); X.lineTo(cx+Math.cos(an)*Math.max(W,H),cy+Math.sin(an)*Math.max(W,H)); X.stroke(); } X.restore();
+    if(t>3){ X.fillStyle='#fff4b0'; for(var st=0;st<55;st++){ var sx=cellHash(st,2)*W, sy=(cellHash(st,7)*H+t*70)%H; X.fillRect(sx,sy,1+cellHash(st,4)*2,1+cellHash(st,4)*2); } }
+    var rocket=Math.max(0,t-3), ry=-rocket*rocket*150, bow=t<1?0:-1.38*ease(clamp((t-1)/0.35,0,1));
+    if(t>1.35&&t<2.1) bow+=Math.sin(clamp((t-1.35)/0.75,0,1)*Math.PI)*0.25;
+    if(t>1.25&&t<5){ X.save(); X.translate(cx,cy+ry); X.globalAlpha=clamp((5-t)/2,0,1); X.shadowColor='#ffd528'; X.shadowBlur=15;
+      for(var bm=0;bm<12;bm++){ var ba=-Math.PI+bm*Math.PI/11; X.strokeStyle=bm%2?'#fff0a0':'#ffc51c'; X.lineWidth=3+(bm%3); X.beginPath(); X.moveTo(Math.cos(ba)*28,Math.sin(ba)*20); X.lineTo(Math.cos(ba)*240,Math.sin(ba)*240); X.stroke(); } X.restore(); }
+    if(t>0.48&&t<1.15){ X.save(); X.strokeStyle='#fff2a0'; X.lineWidth=3; X.shadowColor='#ffd900'; X.shadowBlur=12;
+      for(var li=0;li<7;li++){ var lx=cx-sw*0.43+(li-3)*12; X.beginPath(); X.moveTo(lx,0); X.lineTo(lx+18,cy*0.35); X.lineTo(lx-12,cy*0.62); X.lineTo(cx-sw*0.43,cy); X.stroke(); } X.restore(); }
+    if(t>3){ X.save(); X.translate(cx,cy+ry+38); X.fillStyle='#ffcf32'; X.shadowColor='#ff5b16'; X.shadowBlur=24; X.beginPath(); X.moveTo(-18,0); X.lineTo(0,55+Math.sin(G.t*30)*18); X.lineTo(18,0); X.fill(); X.restore(); }
+    X.save(); X.translate(cx,cy+ry); X.rotate(bow); X.shadowColor='#ffcf38'; X.shadowBlur=20; drawSpecimen(0,0,sw,sw*0.36,S,rec,false);
+    if(t>=0.85) drawTaiTai(-sw*0.43+4,-6,10,'#fff4a8'); X.restore();
+    if(t<0.85){ var me=Math.pow(clamp(t/0.85,0,1),3); drawTaiTai(lerp(cx-W*0.38,cx-sw*0.43+4,me),lerp(cy+H*0.3,cy-6,me),10+me*6,'#fff3a0'); }
+    if(t>0.82&&t<1.02){ X.fillStyle='rgba(255,255,235,'+(0.75*(1-Math.abs(t-0.92)/0.1))+')'; X.fillRect(0,0,W,H); }
+    X.textAlign='center'; X.lineWidth=6; X.strokeStyle='rgba(60,20,0,0.85)';
+    if(t>1.35){ X.font='700 '+Math.min(30,W/12)+'px '+SERIF; X.strokeText('ごちそうさまでしたァァァ！！',cx,H*0.15); X.fillStyle='#fff09a'; X.fillText('ごちそうさまでしたァァァ！！',cx,H*0.15); }
+    if(t>2.05){ X.font='700 '+Math.min(22,W/17)+'px '+SANS; X.strokeText('祝・国宝指定（朝食宇宙遺産）',cx,H*0.22); X.fillStyle='#ffd326'; X.fillText('祝・国宝指定（朝食宇宙遺産）',cx,H*0.22); }
+    if(t>3.55){ X.font='700 15px '+SANS; X.fillStyle='#fff4b0'; X.fillText('成層圏へ標本移送中 ／ 高度 '+Math.floor(rocket*rocket*8200)+' km',cx,H*0.82); }
   } else {
-    X.textAlign='center';
-    X.font='700 20px '+SERIF; X.fillStyle='rgba(230,215,180,'+a+')';
-    X.fillText(G.run.taitaiSwallowed?'鯛の鯛は、胃の中にある。':'鯛の鯛は、見つからなかった。',cx,cy+H*0.22); }
-  X.font='600 10px '+SANS; X.textAlign='center'; X.fillStyle='rgba(160,140,100,0.7)'; X.fillText('タップで進む',cx,H-24); }
+    var pulse=0.45+0.35*Math.sin(t*22); X.fillStyle='rgba(170,0,0,'+pulse+')'; X.fillRect(0,0,W,H);
+    X.save(); X.translate(cx,cy); X.strokeStyle='#ffb0a0'; X.fillStyle='rgba(70,0,0,0.65)'; X.shadowColor='#ff251b'; X.shadowBlur=20; X.lineWidth=4;
+    X.beginPath(); X.arc(0,-100,35,0,TAU); X.fill(); X.stroke(); X.beginPath(); X.moveTo(0,-65); X.lineTo(0,85); X.stroke();
+    for(var xr=0;xr<7;xr++){ X.beginPath(); X.ellipse(0,-45+xr*15,55-xr*3,18,0,0,Math.PI); X.stroke(); }
+    X.strokeRect(-78,-145,156,260); drawTaiTai(0,50,15+Math.sin(t*16)*3,'#fff0a0'); X.restore();
+    X.textAlign='center'; X.font='700 '+Math.min(25,W/15)+'px '+SERIF; X.fillStyle='#fff0c0';
+    if(t>0.45) X.fillText('鯛の鯛、胃袋の中で覚醒！！',cx,H*0.14);
+    if(t>1.25){ X.font='700 '+Math.min(23,W/16)+'px '+SERIF; X.fillText('人間の方が標本に収蔵されました',cx,H*0.83); }
+  }
+  X.font='600 10px '+SANS; X.textAlign='center'; X.fillStyle='rgba(220,180,110,0.8)'; X.fillText('タップで進む',cx,H-24);
+}
 function drawResult(){
   X.fillStyle='#0d0b09'; X.fillRect(0,0,W,H);
   var vg=X.createRadialGradient(W/2,H*0.4,10,W/2,H*0.4,Math.max(W,H)*0.7);
@@ -1507,7 +1545,7 @@ function drawResult(){
     var colI=r%3, rowI=(r/3)|0, bx=gx+colI*(bw+8), by=62+rowI*(bh+30);
     drawSpecimen(bx+bw/2,by+bh/2,bw,bh,STAGES[recs[r].si],recs[r],true);
     X.font='600 10px '+SANS; X.textAlign='center'; X.fillStyle='rgba(210,190,140,0.9)';
-    X.fillText('第'+(r+1)+'膳 '+recs[r].name+' '+recs[r].score+'%',bx+bw/2,by+bh+11); }  var listY=62+2*(bh+30)+4, cardW=Math.min(cw-24,380), avg=avgScore();
+    X.fillText('第'+(r+1)+'膳 '+recs[r].name+' '+recs[r].score+'%',bx+bw/2,by+bh+11); }  var listY=62+2*(bh+30)+4, cardW=Math.min(cw-24,380), avg=avgScore(), high=avg>=85;
   var spTot=0, rbTot=0, swTot=0, plTot=0, skC=0, skT=0;
   for(var j=0;j<recs.length;j++){ spTot+=recs[j].spine.length; rbTot+=recs[j].ribs.length; swTot+=recs[j].swallowed; plTot+=recs[j].pulled; skC+=recs[j].skinClean||0; skT+=recs[j].skinTorn||0; }
   var details=[];
@@ -1522,6 +1560,8 @@ function drawResult(){
   if(details.length<5&&skC+skT>0) details.push('皮 — きれいに剥ぎ'+skC+'列／裂き'+skT+'列');
   var taiTxt=G.run.taitaiFound?'鯛の鯛: 発見':(G.run.taitaiSwallowed?'鯛の鯛: 嚥下(飲み込んだ)':'鯛の鯛: 未発見');
   var cardH=66+details.length*16;
+  if(high){ var hg=X.createRadialGradient(cw/2,listY+35,8,cw/2,listY+35,210); hg.addColorStop(0,'rgba(255,209,55,0.72)'); hg.addColorStop(1,'rgba(255,180,20,0)'); X.fillStyle=hg; X.fillRect(0,listY-160,cw,390);
+    X.save(); X.translate(cw/2,listY+35); X.strokeStyle='rgba(255,210,65,0.65)'; for(var hr=0;hr<20;hr++){ var ha=hr*TAU/20; X.lineWidth=2+(hr%3); X.beginPath(); X.moveTo(Math.cos(ha)*115,Math.sin(ha)*75); X.lineTo(Math.cos(ha)*195,Math.sin(ha)*155); X.stroke(); } X.restore(); }
   box(cw/2-cardW/2,listY,cardW,cardH,5,'rgba(245,240,228,0.96)','rgba(184,150,63,0.7)',1.4);
   X.textAlign='center';
   X.font='700 19px '+SERIF; X.fillStyle='#2a2115'; X.fillText('骨格完全度 '+avg+'%',cw/2,listY+22);
@@ -1534,11 +1574,14 @@ function drawResult(){
   }
   var ry=listY+cardH+34;
   X.save();
-  X.translate(cw/2,ry); X.rotate(-0.05);
+  X.translate(cw/2-(high?55:0),ry); X.rotate(-0.05);
   box(-92,-24,184,48,6,'#a33326','rgba(255,235,215,0.55)',1.2);
   X.font='700 21px '+SERIF; X.fillStyle='#fff4e6'; X.textAlign='center'; X.textBaseline='middle';
   X.fillText('『 '+rankOf()+' 』',0,1);
-  X.restore(); X.textBaseline='alphabetic';
+  X.restore();
+  if(high){ X.save(); X.translate(cw/2+82,ry); X.rotate(0.1); X.shadowColor='#ffd23e'; X.shadowBlur=18; box(-61,-31,122,62,3,'rgba(125,15,10,0.93)','#ff6545',4);
+    X.font='700 20px '+SERIF; X.fillStyle='#fff0ce'; X.textAlign='center'; X.textBaseline='middle'; X.fillText('国宝・',0,-12); X.fillText('朝食標本',0,14); X.restore(); }
+  X.textBaseline='alphabetic';
   // 称号図鑑(過去取得は名前で、未獲得だけ？？？+条件)
   var ty=ry+46, set=earnedTitles();
   X.font='600 11px '+SANS; X.textAlign='center'; X.fillStyle='rgba(200,170,110,0.9)'; X.fillText('─ 称号図鑑 ─',cw/2,ty);
@@ -1595,7 +1638,7 @@ function drawFx(tailOnly){
       var s=G.steams[i2], pr=s.t/s.life;
       X.save();
       X.globalAlpha=Math.max(0,(1-pr)*0.4);
-      X.strokeStyle='#fff'; X.lineWidth=2;
+      X.strokeStyle=s.col||'#fff'; X.lineWidth=s.big?3.5:2; if(s.big){ X.shadowColor=s.col||'#ffd76a'; X.shadowBlur=9; }
       var sx=s.x+Math.sin(s.t*2+s.dr)*6+pr*s.dr*2, sy=s.y-pr*46;
       X.beginPath(); X.moveTo(sx-3,sy+6); X.quadraticCurveTo(sx+3,sy,sx-2,sy-10); X.stroke();
       X.restore(); }
@@ -1672,75 +1715,45 @@ function stAll(f){ for(var i=0;i<f.cells.length;i++) if(f.cells[i].alive) killCe
 function stMid(f){ var lo=Math.floor(f.N*0.28), hi=Math.ceil(f.N*0.72);
   for(var j=0;j<f.cells.length;j++){ var c=f.cells[j]; if(c.alive&&c.col>=lo&&c.col<hi&&c.row<f.R-2) killCell(f,c); } }
 function selfTestBody(){
-  var f,w,b,tc,ok,pp,half,flexed,c0,sy,sx,pts,k;
-  startRun(); G.bannerT=2.7; update(0.05); f=G.fish;
-  rec('開始:startRun→第1膳play',G.scene==='play'&&G.stage===0&&f.aliveCount>0);
-  var a0=f.aliveCount, t0=G.timer;
-  G.pressed=true; stSimP(8,0.15,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.4);
-  rec('弱圧:身はほぐれないが時は流れる',G.timer<t0&&f.aliveCount<=a0);
-  stSimP(50,0.55,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.4);
-  rec('適圧:aliveCount減少',f.aliveCount<a0);
-  stSimP(14,0.97,f.segs[8].x,-hwRaw(f,f.segs[8].x)*0.6);
+  var f,w,b,tc,ok,pp,half,flexed,c0,sy,sx,pts,k,sawFiber=false;
+  startRun(); G.bannerT=2.7; update(0.05); f=G.fish; rec('開始:startRun→第1膳play',G.scene==='play'&&G.stage===0&&f.aliveCount>0);
+  var a0=f.aliveCount, t0=G.timer; G.pressed=true; stSimP(8,0.15,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.4);
+  rec('弱圧:身はほぐれないが時は流れる',G.timer<t0&&f.aliveCount<=a0); stSimP(50,0.55,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.4);
+  rec('適圧:aliveCount減少',f.aliveCount<a0); stSimP(14,0.97,f.segs[8].x,-hwRaw(f,f.segs[8].x)*0.6);
   pp=null; for(k=0;k<G.popups.length;k++) if(G.popups[k].text==='ピキッ') pp=G.popups[k];
   rec('肋骨折損:ピキッ位置有限+部位ラベル',f.ribBreaks.length>0&&!!pp&&isFinite(pp.x)&&isFinite(pp.y)&&!!G.label&&G.label.indexOf('肋骨')>=0);
-  stPtr(f,f.segs[8].x,0);
-  ok=stUntil(function(){ return f.spineBreaks.length>0; },900);
+  stPtr(f,f.segs[8].x,0); ok=stUntil(function(){ return f.spineBreaks.length>0; },900);
   rec('中骨折損:コキッ+館長テロップ',ok&&isFinite(f.spineBreaks[0].kink)&&G.run.curatorDone===true);
   stSimP(34,0.7,f.segs[3].x,-hwRaw(f,f.segs[3].x)*0.95); stSimP(34,0.99,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.95);
-  render(); rec('皮損傷段階:剥ぎ(適圧)と裂き(強圧)を計上',f.skinClean>=1&&f.skinTorn>=1);
-  G.pressed=false; stAll(f); render();
+  render(); rec('皮損傷段階:剥ぎ(適圧)と裂き(強圧)を計上',f.skinClean>=1&&f.skinTorn>=1); G.pressed=false; stAll(f); render();
   rec('第1膳完食→記録(棚に赤い折損痕)',G.run.records.length===1&&G.run.records[0].spine.length>=1&&G.run.records[0].ribs.length>=1&&G.scene==='clearing');
   stGo(1); f=G.fish; b=f.smallbones[0]; b.reveal=1; b.cellRef.dmg=0.6; G.pressed=true;
-  stPtr(f,b.x,b.y+offSide(f,b.cellRef.side)); tryPull({x:G.ptr.x,y:G.ptr.y});
-  ok=stUntil(function(){ return b.state==='pulled'; },40);
-  rec('小骨:露出→押さえ長押し→抜去',ok&&f.pulledCount===1);
-  G.pressed=false; stAll(f);
-  stGo(2); f=G.fish; doRotate();
-  rec('さば回転',stUntil(function(){ return !G.anim&&Math.abs(f.angCur-Math.PI)<0.01; },40));
-  G.pressed=false; stAll(f);
-  stGo(3); f=G.fish; doFlip();
-  rec('かれい裏返し',stUntil(function(){ return !G.anim&&f.side===1; },40));
-  stAll(f);
-  stGo(4); f=G.fish; G.pressed=false;
-  pts=spinePts(f); c0=Math.floor(f.N/2); sy=pts[c0].y; sx=f.segs[c0].x;
-  w=stPtr(f,sx,sy); ok=tryOpenDrag({x:w.x,y:w.y}); doOpen();
-  rec('ほっけ開放:未熟は拒否',!ok&&!G.openDrag&&f.split===0&&!G.anim);
-  stMid(f); update(0.05);
-  G.pressed=true; stPtr(f,sx,sy); tryOpenDrag({x:G.ptr.x,y:G.ptr.y});
-  half=0;
-  for(k=1;k<=3;k++){ stPtr(f,sx+f.fishLen*0.09*k,sy); stSim(2); if(k===2) half=f.split; }
-  G.pressed=false;
-  ok=stUntil(function(){ return !G.openDrag&&f.split<0.05; },80);
-  rec('ほっけ開放:途中で離すと戻る+中骨が覗く',splitReady(f)&&half>0.15&&ok);
-  G.pressed=true; stPtr(f,sx,sy); tryOpenDrag({x:G.ptr.x,y:G.ptr.y});
-  half=0;
-  for(k=1;k<=6;k++){ stPtr(f,sx+f.fishLen*0.07*k,sy); stSim(2); if(k===4) half=f.split; }
-  render(); G.pressed=false;
-  rec('ほっけ開放:指で引き開ける(splitが指に追従)',f.split===1&&!G.openDrag&&half>0.5&&G.fibers.length>0);
-  retryStage(); G.bannerT=2.7; update(0.05); f=G.fish; stMid(f); doOpen();
-  rec('ほっけ開放:O補助でも開く(PC同等)',stUntil(function(){ return !G.anim&&f.split===1; },40));
-  G.pressed=false; stAll(f);
-  stGo(5); f=G.fish; G.timer=0.05; G.pressed=false;
-  stUntil(function(){ return G.scene==='fail'; },20); render();
+  stPtr(f,b.x,b.y+offSide(f,b.cellRef.side)); tryPull({x:G.ptr.x,y:G.ptr.y}); ok=stUntil(function(){ return b.state==='pulled'; },40);
+  rec('小骨:露出→押さえ長押し→抜去',ok&&f.pulledCount===1); G.pressed=false; stAll(f); stGo(2); f=G.fish; doRotate();
+  rec('さば回転',stUntil(function(){ return !G.anim&&Math.abs(f.angCur-Math.PI)<0.01; },40)); G.pressed=false; stAll(f); stGo(3); f=G.fish; doFlip();
+  rec('かれい裏返し',stUntil(function(){ return !G.anim&&f.side===1; },40)); stAll(f); stGo(4); f=G.fish; G.pressed=false;
+  pts=spinePts(f); c0=Math.floor(f.N/2); sy=pts[c0].y; sx=f.segs[c0].x; w=stPtr(f,sx,sy); ok=tryOpenDrag({x:w.x,y:w.y}); doOpen();
+  rec('ほっけ開放:未熟は拒否',!ok&&!G.openDrag&&f.split===0&&!G.anim); stMid(f); update(0.05);
+  G.pressed=true; stPtr(f,sx,sy); tryOpenDrag({x:G.ptr.x,y:G.ptr.y}); half=0;
+  for(k=1;k<=3;k++){ stPtr(f,sx+f.fishLen*0.09*k,sy); stSim(2); if(k===2) half=f.split; } G.pressed=false;
+  ok=stUntil(function(){ return !G.openDrag&&f.split<0.05; },80); rec('ほっけ開放:途中で離すと戻る+中骨が覗く',splitReady(f)&&half>0.15&&ok);
+  G.pressed=true; stPtr(f,sx,sy); tryOpenDrag({x:G.ptr.x,y:G.ptr.y}); half=0;
+  for(k=1;k<=6;k++){ stPtr(f,sx+f.fishLen*0.07*k,sy); stSim(2); if(G.fibers.length>0) sawFiber=true; if(k===4) half=f.split; }
+  render(); G.pressed=false; rec('ほっけ開放:指で引き開ける(splitが指に追従)',f.split===1&&!G.openDrag&&half>0.5&&(sawFiber||G.fibers.length>0));
+  retryStage(); G.bannerT=2.7; update(0.05); f=G.fish; stMid(f); doOpen(); rec('ほっけ開放:O補助でも開く(PC同等)',stUntil(function(){ return !G.anim&&f.split===1; },40));
+  G.pressed=false; stAll(f); stGo(5); f=G.fish; G.timer=0.05; G.pressed=false; stUntil(function(){ return G.scene==='fail'; },20); render();
   rec('時間切れ:鯛の鯛未発見のままfail',G.scene==='fail'&&!G.run.taitaiFound&&!G.run.taitaiSwallowed&&failShareText().indexOf('焼き魚')>=0);
   retryStage(); rec('同膳リトライ(retries加算)',G.scene==='intro'&&G.run.retries===2);
   G.bannerT=2.7; update(0.05); f=G.fish; tc=f.cells[f.taitai.cell]; tc.dmg=0.6; update(0.05);
-  G.pressed=true; stPtr(f,f.taitai.x,f.taitai.y+offSide(f,tc.side)); tryPull({x:G.ptr.x,y:G.ptr.y});
-  flexed=false;
-  stUntil(function(){ if(f.pullFlex>0.05) flexed=true; return G.run.taitaiFound; },40);
-  rec('鯛の鯛:きらめき→長押し引き抜き→発見',G.run.taitaiFound&&flexed);
-  G.pressed=false; stAll(f);
-  ok=stUntil(function(){ return G.scene==='taitai'; },80); render();
+  G.pressed=true; stPtr(f,f.taitai.x,f.taitai.y+offSide(f,tc.side)); tryPull({x:G.ptr.x,y:G.ptr.y}); flexed=false;
+  stUntil(function(){ if(f.pullFlex>0.05) flexed=true; return G.run.taitaiFound; },40); rec('鯛の鯛:きらめき→長押し引き抜き→発見',G.run.taitaiFound&&flexed);
+  G.pressed=false; stAll(f); ok=stUntil(function(){ return G.scene==='taitai'; },80); render();
   rec('6膳完走→鯛の鯛演出→リザルト+セーブ',ok&&stUntil(function(){ return G.scene==='result'; },160)&&G.run.saved===true);
-  render();
-  var txt=shareText(); doShare();
-  rec('リザルト共有文(doShare)',txt.indexOf('骨格完全度')>=0);
-  startRun(); rec('もう一度(startRun)',G.scene==='intro'&&G.stage===0);
-  G.bannerT=2.7; update(0.05); f=G.fish; stAll(f);
+  render(); var txt=shareText(); doShare(); rec('リザルト共有文(doShare)',txt.indexOf('骨格完全度')>=0);
+  startRun(); rec('もう一度(startRun)',G.scene==='intro'&&G.stage===0); G.bannerT=2.7; update(0.05); f=G.fish; stAll(f);
   rec('零傷賛辞:折らずに第1膳クリア→館長テロップ',G.zeroPraise===true&&!!G.curator&&G.curator.text.indexOf('考古学的に完食')>=0);
   rec('セーブ合成:称号・前回ベスト退避',typeof G.prevBestAvg==='number'&&typeof G.prevLeastBrk==='number'&&!!earnedTitles().polite);
-  stGo(5); f=G.fish; killCell(f,f.cells[f.taitai.cell]);
-  rec('鯛の鯛:嚥下(飲み込む)もあり得る',G.run.taitaiSwallowed===true);
+  stGo(5); f=G.fish; killCell(f,f.cells[f.taitai.cell]); rec('鯛の鯛:嚥下(飲み込む)もあり得る',G.run.taitaiSwallowed===true);
 }
 function runSelfTest(){
   if(ST.on) return;
@@ -1768,30 +1781,17 @@ function runSelfTest(){
 var last=performance.now();
 function loop(now){
   try{
-    var dt=(now-last)/1000;
-    last=now;
-    if(dt<0) dt=0;
-    if(dt>0.05) dt=0.05;
-    update(dt*G.timeScale);
-    render();
-  }catch(e){
-    try{ console.error('[loop]', e); }catch(e2){}
-  }
+    var dt=(now-last)/1000; last=now; if(dt<0) dt=0; if(dt>0.05) dt=0.05;
+    update(dt*G.timeScale); render();
+  }catch(e){ try{ console.error('[loop]', e); }catch(e2){} }
   requestAnimationFrame(loop);
 }
-resize();
-statEl=document.getElementById('stat'); evdEl=document.getElementById('evd');
+resize(); statEl=document.getElementById('stat'); evdEl=document.getElementById('evd');
 for(var mi=0;mi<14;mi++) G.motes.push({x:rnd(0,W||800),y:rnd(0,(H||600)*0.7),ph:rnd(0,TAU),r:rnd(0.8,2)});
-G.save=loadSave();
-newRun();
-G.scene='title';
-if(location.protocol==='file:'){ try{ runSelfTest(); }catch(e){} }
-requestAnimationFrame(loop);
-try{
-  window.__ykh={ G:G, STAGES:STAGES, startRun:startRun, startStage:startStage, retryStage:retryStage,
-    doRotate:doRotate, doFlip:doFlip, doOpen:doOpen, doShare:doShare, killCell:killCell,
-    l2w:l2w, w2l:w2l, layout:layout, splitReady:splitReady, spinePts:spinePts, hwRaw:hwRaw, offSide:offSide,
-    runSelfTest:runSelfTest, testResult:null };
+G.save=loadSave(); newRun(); G.scene='title'; if(location.protocol==='file:'){ try{ runSelfTest(); }catch(e){} } requestAnimationFrame(loop);
+try{ window.__ykh={ G:G, STAGES:STAGES, startRun:startRun, startStage:startStage, retryStage:retryStage,
+  doRotate:doRotate, doFlip:doFlip, doOpen:doOpen, doShare:doShare, killCell:killCell, l2w:l2w, w2l:w2l, layout:layout,
+  splitReady:splitReady, spinePts:spinePts, hwRaw:hwRaw, offSide:offSide, runSelfTest:runSelfTest, testResult:null };
 }catch(e){}
 </script>
 </body>
