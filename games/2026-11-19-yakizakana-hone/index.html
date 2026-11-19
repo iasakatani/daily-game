@@ -1,0 +1,1798 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>焼き魚の骨を、一本も折らずに食べろ。</title>
+<meta property="og:title" content="焼き魚の骨を、一本も折らずに食べろ。">
+<meta property="og:description" content="箸の圧ひとつで骨は折れる。焼き魚を骨格標本になるまで、骨を一本も折らずに食べきる6膳。皮を剥き、ほぐし、開き、鯛の鯛を探せ。完全度と折れた骨の部位がリザルトに並ぶ、静かな朝食ゲーム。">
+<meta property="og:image" content="screenshot.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+html,body{margin:0;padding:0;height:100%;background:#141110;overflow:hidden;}
+body{position:relative;}
+#game{display:block;touch-action:none;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;cursor:crosshair;}
+#stat,#evd{position:absolute;left:0;right:0;text-align:center;pointer-events:none;white-space:nowrap;overflow:hidden;}
+#stat{bottom:12px;height:11px;font:600 9px/11px "Yu Gothic","Hiragino Kaku Gothic ProN","Meiryo",sans-serif;color:rgba(110,88,55,0.62);letter-spacing:.05em;}
+#evd{bottom:1px;height:10px;font:600 8px/10px "Yu Gothic","Hiragino Kaku Gothic ProN","Meiryo",sans-serif;color:rgba(130,105,60,0.55);}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="stat"></div>
+<div id="evd"></div>
+<script>
+'use strict';
+var TAU=Math.PI*2;
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function ease(t){ t=clamp(t,0,1); return t*t*(3-2*t); }
+function fmtTime(sec){ sec=Math.max(0,Math.round(sec)); var m=(sec/60)|0,s=sec%60; return m+':'+(s<10?'0':'')+s; }
+function cellHash(a,b){ var v=Math.sin(a*127.1+b*311.7)*43758.5453; return v-Math.floor(v); }
+var SERIF='"Yu Mincho","YuMincho","Hiragino Mincho ProN","MS PMincho",serif';
+var SANS='"Yu Gothic","Hiragino Kaku Gothic ProN","Meiryo",sans-serif';
+var HEXC={};
+function mixCol(hex,to,t){
+  function h2r(h){ if(HEXC[h]) return HEXC[h]; h=h.replace('#',''); var v=[parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)]; HEXC[h]=v; return v; }
+  var a=h2r(hex), b=h2r(to);
+  return 'rgb('+Math.round(lerp(a[0],b[0],t))+','+Math.round(lerp(a[1],b[1],t))+','+Math.round(lerp(a[2],b[2],t))+')';
+}
+var CV=document.getElementById('game'), X=CV.getContext('2d'), W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2); W=window.innerWidth; H=window.innerHeight;
+  CV.width=Math.round(W*DPR); CV.height=Math.round(H*DPR); CV.style.width=W+'px'; CV.style.height=H+'px';
+  if(G&&G.fish) fishGeom(G.fish);
+  buildBgC(); PLC.cv=null; DIMPC={};
+}
+window.addEventListener('resize',function(){ resize(); });
+function layout(){
+  var play=(G.scene==='intro'||G.scene==='play'||G.scene==='clearing'||G.scene==='fail'||G.scene==='inter');
+  var shelfH=play?54:0, top=shelfH+8;
+  var plateR=Math.min(W*0.44,(H-top)*0.335,235);
+  return { play:play, shelfH:shelfH, top:top, cx:W/2, cy:top+(H-top)*0.5+12, plateR:plateR };
+}
+var AU={ctx:null,ok:false};
+function audioInit(){
+  if(AU.ctx){ try{ if(AU.ctx.state==='suspended') AU.ctx.resume(); }catch(e){} return; }
+  try{ var AC=window.AudioContext||window.webkitAudioContext; if(AC){ AU.ctx=new AC(); AU.ok=true; } }catch(e){ AU.ok=false; } }
+function toneAt(f0,d,type,vol,t0,f1){
+  if(!AU.ok) return;
+  try{
+    var t=AU.ctx.currentTime+(t0||0), o=AU.ctx.createOscillator(), g=AU.ctx.createGain();
+    o.type=type||'sine'; o.frequency.setValueAtTime(f0,t);
+    if(f1) o.frequency.exponentialRampToValueAtTime(Math.max(30,f1),t+d);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol||0.1,t+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+    o.connect(g); g.connect(AU.ctx.destination); o.start(t); o.stop(t+d+0.03);
+  }catch(e){}
+}
+function noiseAt(d,freq,vol,t0){
+  if(!AU.ok) return;
+  try{
+    var t=AU.ctx.currentTime+(t0||0), n=Math.max(16,Math.floor(AU.ctx.sampleRate*d));
+    var buf=AU.ctx.createBuffer(1,n,AU.ctx.sampleRate), data=buf.getChannelData(0);
+    for(var i=0;i<n;i++) data[i]=(Math.random()*2-1)*(1-i/n);
+    var src=AU.ctx.createBufferSource(); src.buffer=buf;
+    var bp=AU.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=freq; bp.Q.value=0.9;
+    var g=AU.ctx.createGain(); g.gain.value=vol||0.1;
+    src.connect(bp); bp.connect(g); g.connect(AU.ctx.destination); src.start(t);
+  }catch(e){}
+}
+var sfxT={peel:0,creak:0};
+function sPeel(){ var n=performance.now(); if(n-sfxT.peel<85) return; sfxT.peel=n; noiseAt(0.06,rnd(1500,2600)*(1+Math.min(G.combo||0,12)*0.045),0.05); }
+function sSkinPeel(){ noiseAt(0.13,480,0.11); toneAt(190,0.12,'sine',0.05,0,120); }
+function sCrack(){ noiseAt(0.09,700,0.22); toneAt(85,0.16,'square',0.16,0,55); }
+function sRibcrack(){ noiseAt(0.06,1100,0.12); toneAt(160,0.1,'square',0.08,0,110); }
+function sCreak(){ var n=performance.now(); if(n-sfxT.creak<260) return; sfxT.creak=n; toneAt(140,0.22,'sawtooth',0.045,0,96); }
+function sChiku(){ toneAt(1750,0.09,'square',0.1,0,2400); }
+function sClick(){ toneAt(950,0.03,'square',0.06); }
+function sBoneHit(){ toneAt(rnd(800,1200),0.04,'square',0.09); noiseAt(0.03,2400,0.05); }
+function sPullDone(){ toneAt(620,0.09,'triangle',0.09); toneAt(920,0.12,'triangle',0.09,0.09); }
+function sTaitai(){ toneAt(880,0.5,'sine',0.09); toneAt(1320,0.6,'sine',0.07,0.25); toneAt(1760,0.8,'sine',0.05,0.5); }
+function sDrone(){ toneAt(58,1.6,'sine',0.1); toneAt(87,1.6,'sine',0.06,0.1); }
+function sClear(){ toneAt(660,0.14,'triangle',0.09); toneAt(880,0.16,'triangle',0.09,0.12); toneAt(1100,0.3,'triangle',0.08,0.24); }
+function sFail(){ toneAt(220,0.5,'triangle',0.1,0,110); }
+function sTick(){ toneAt(1450,0.04,'square',0.05); }
+function sCombo(n){ toneAt(480+n*70,0.09,'triangle',0.06); toneAt((480+n*70)*1.5,0.12,'triangle',0.05,0.05); }
+var STAGES=[
+ { key:'sanma', name:'さんま', full:'第1膳『さんま』', time:45, N:16, R:4, hMax:34, sweetLo:0.30, sweetHi:0.78, stressMul:0.55, shred:false, small:0, slip:false, rotate:false, flip:false, open:false, taitai:false, hpMul:1.0,
+   pal:{skin:'#6b4322',flesh:'#c9914f',deep:'#e9cf9d'}, tip:'押したまま、なぞって身を剥がす。強く押すと、骨が悲鳴を上げる。', hint1:'押し続けると箸が沈む。その加減のまま、なぞる。' },
+ { key:'aji', name:'あじ', full:'第2膳『あじ』', time:40, N:15, R:3, hMax:27, sweetLo:0.32, sweetHi:0.76, stressMul:0.8, shred:true, small:6, firstBone:true, slip:false, rotate:false, flip:false, open:false, taitai:false, hpMul:0.85,
+   pal:{skin:'#7d5a2d',flesh:'#c08a52',deep:'#e8cd9e'}, tip:'小骨は、つまんで少し待って抜く。急ぐと身が崩れ、小骨ごと飲み込む。', hint1:'小骨の先が見えたら、そこを押さえて動かず待つ。' },
+ { key:'saba', name:'さばの味噌煮', full:'第3膳『さばの味噌煮』', time:38, N:16, R:4, hMax:33, sweetLo:0.34, sweetHi:0.74, stressMul:1.15, shred:false, small:4, slip:true, rotate:true, flip:false, open:false, taitai:false, hpMul:0.95,
+   pal:{skin:'#5a3417',flesh:'#a87040',deep:'#dfc08c'}, tip:'汁気の側で箸は滑る。乾いた側から手をつけろ。皿は、回せる。', hint1:'煮汁が溜まった側では、箸が流される。' },
+ { key:'karei', name:'かれい', full:'第4膳『かれい』', time:35, N:14, R:3, hMax:48, len:0.8, sweetLo:0.33, sweetHi:0.76, stressMul:0.9, shred:false, small:0, slip:false, rotate:false, flip:true, open:false, taitai:false, hpMul:0.8,
+   pal:{skin:'#57371b',flesh:'#c79a5f',deep:'#ead9a8'}, pal1:{skin:'#cbb98e',flesh:'#e6d7b2',deep:'#f2e8c8'}, smallSides:[4,4],
+   tip:'片面を食べ尽くしたら、裏返す。骨格の半分は、まだ見えていない。', hint1:'表を食べたら『裏返す』。裏の身は白い。' },
+ { key:'hokke', name:'ほっけ', full:'第5膳『ほっけ』', time:42, N:22, R:4, hMax:40, sweetLo:0.32, sweetHi:0.77, stressMul:1.4, shred:false, small:4, slip:false, rotate:false, flip:false, open:true, taitai:false, hpMul:0.9,
+   pal:{skin:'#4c381c',flesh:'#bd8a4a',deep:'#e6c58e'}, tip:'開きは、まだ閉じている。中央の身を剥がして中骨が覗いたら、押さえたまま頭か尾側へ引き開けろ。', hint1:'内側の身は、開くまで届かない。' },
+ { key:'tai', name:'たい', full:'第6膳『たい』', time:40, N:18, R:4, hMax:36, sweetLo:0.36, sweetHi:0.66, stressMul:1.4, shred:false, small:5, slip:false, rotate:false, flip:false, open:false, taitai:true, hpMul:1.0,
+   pal:{skin:'#9e3f35',flesh:'#d9a97c',deep:'#efcf9e'}, tip:'骨は硬く、警告は短い。頭の奥に『鯛の鯛』が眠る。見つけたら、じっと引き抜け。', hint1:'鯛の鯛は、頭の近くの輝き。押さえて、じっと。' }
+];
+var AFTER_LINES=[
+ '一尾完食。骨は、まだ折れていない。','小骨の山は、昨日の自分への戒め。','煮汁まで舐めたな。だが次は、平たい相手だ。',
+ '表も裏も、食べた。次は、大きい。','開いた。次は、いよいよ鯛の膳。ここまで来た者だけが、標本に値する。'
+];
+var G={ scene:'title', t:0, timeScale:1, slow:0, anim:null, stage:0, fish:null, timer:0,
+  ptr:{x:-999,y:-999}, pressed:false, pressT:0, pressKick:0, P:0, tip:{x:0,y:0}, slipX:0, tipSpd:0,
+  pull:null, bannerT:0, interT:0, clearT:0, taitaiT:0, taitaiSkip:false, shake:0, flashA:0, flashCol:'#fff',
+  label:null, labelT:0, curator:null, popups:[], parts:[], steams:[], motes:[], fibers:[], buttons:[], primary:null,
+  run:null, hint:'', hintT:0, lastTick:99, clearClicks:0, openDrag:null, zeroPraise:false, _openReady:false,
+  combo:0, lastKill:-9, save:null, deltaAvg:0, deltaBrk:0, prevBestAvg:null, prevLeastBrk:null };
+var ZERO_PRAISED=false;
+function newRun(){
+  G.run={ records:[], taitaiFound:false, taitaiSwallowed:false, retries:0, curatorDone:false, firstSwallow:false, saved:false };
+}
+function startRun(){ newRun(); startStage(0); }
+function resetPlay(si){
+  G.fish=buildFish(si); G.scene='intro'; G.bannerT=0; G.timer=STAGES[si].time;
+  G.P=0; G.pressed=false; G.pull=null; G.openDrag=null; G.slipX=0; G.tip.x=W/2; G.tip.y=H*0.55;
+  G.hint=STAGES[si].tip; G.hintT=0; G.label=null; G.labelT=0; G.lastTick=99; G.combo=0; G.curator=null;
+  G.zeroPraise=false; G._openReady=false;
+}
+function startStage(si){ G.stage=si; resetPlay(si); }
+function retryStage(){ G.run.retries++; resetPlay(G.stage); }
+function fishProfile(t){ return Math.max(0.14,Math.pow(Math.sin(Math.PI*(0.10+0.80*t)),0.85)); }
+function buildFish(si){
+  var S=STAGES[si];
+  var f={ S:S, si:si, N:S.N, R:S.R, side:0, flipT:0, angCur:0, angTo:0, rotT:-1, spineBreaks:[], ribBreaks:[],
+          swallowed:0, pulledCount:0, skinClean:0, skinTorn:0, _sg:null, split:0, splitT:0, spreadCur:0, flexDir:1, pullFlex:0, taitaiCol:-1 };
+  f.cells=[]; f.segs=[]; f.ribs=[]; f.smallbones=[]; f.taitai=null;
+  fishGeom(f);
+  var colW=f.fishLen/f.N, rW=f.fishLen/(f.N-1);
+  for(var i=0;i<f.N;i++){
+    var t=i/(f.N-1), hw=f.hMax*fishProfile(t), xC=-f.fishLen/2+f.fishLen*((i+0.5)/f.N);
+    for(var s=0;s<2;s++){
+      var yb=(s===0?-hw:0), yt=(s===0?0:hw);
+      for(var r=0;r<f.R;r++){
+        var c={ i:f.cells.length, col:i, side:s, row:r, x:xC, y:yb+(yt-yb)*((r+0.5)/f.R), w:colW, h:Math.abs(yt-yb)/f.R,
+                hp:(1+(r===f.R-1?0.25:0))*S.hpMul, max:0, dmg:0, alive:true, small:-1, taitai:false };
+        c.max=c.hp; f.cells.push(c); }
+    }
+  }
+  for(var ci=0;ci<f.cells.length;ci++){
+    var c2=f.cells[ci]; c2.nb=[];
+    for(var cj=0;cj<f.cells.length;cj++){
+      if(ci===cj) continue;
+      var o=f.cells[cj];
+      if(o.side!==c2.side) continue;
+      if(Math.abs(o.col-c2.col)<=1&&Math.abs(o.row-c2.row)<=1) c2.nb.push(o.i); } }
+  // 皮(独立した剥離対象・外側の帯)と椎骨(脊柱側のrow=R-1が守る)
+  f.skins=[[],[]];
+  for(var s2=0;s2<2;s2++) for(var i2=0;i2<f.N;i2++)
+    f.skins[s2].push({col:i2, side:s2, alive:true, torn:false, dmg:0, hp:0.9*S.hpMul, max:0.9*S.hpMul, peel:0, rift:0});
+  for(var i3=0;i3<f.N;i3++){
+    var seg={i:i3, x:f.xs[i3]+rW/2, stress:0, broken:false, kink:0, expo:0, cover:[]};
+  for(var ci2=0;ci2<f.cells.length;ci2++){ var cc=f.cells[ci2]; if(cc.col===i3&&cc.row===f.R-1) seg.cover.push(cc.i); }
+    f.segs.push(seg);
+  }
+  var no=[0,0];
+  for(var i4=2;i4<=f.N-3;i4+=2){
+    for(var s3=0;s3<2;s3++){
+      no[s3]++;
+      var rb={col:i4, side:s3, no:no[s3], hp:1, broken:false, expo:0, cover:[]};
+      for(var ci3=0;ci3<f.cells.length;ci3++){
+        var cc2=f.cells[ci3];
+        if(cc2.col===i4&&cc2.side===s3&&cc2.row>=1&&cc2.row<=f.R-2) rb.cover.push(cc2.i); }
+      f.ribs.push(rb); } }
+  var want=S.smallSides?S.smallSides[0]+S.smallSides[1]:S.small;
+  var pool=[];
+  for(var ci4=0;ci4<f.cells.length;ci4++){
+    var c4=f.cells[ci4];
+    if(c4.row>=1&&c4.row<=f.R-2&&c4.col>=2&&c4.col<=f.N-3) pool.push(c4); }
+  for(var p=pool.length-1;p>0;p--){ var q=(Math.random()*(p+1))|0, tmp=pool[p]; pool[p]=pool[q]; pool[q]=tmp; }
+  if(S.firstBone&&want>0){
+    var cC=null;
+    for(var fc=0;fc<f.cells.length;fc++){
+      var cc3=f.cells[fc];
+      if(cc3.col===Math.floor(f.N/2)&&cc3.row===1&&cc3.side===0&&cc3.small<0){ cC=cc3; break; } }
+    if(cC){
+      f.smallbones.push({cell:cC.i, x:cC.x, y:cC.y, ang:-Math.PI/2+rnd(-0.3,0.3), state:'in', reveal:0, cellRef:cC});
+      cC.small=f.smallbones.length-1; want--; } }
+  var placed=0, guard=0;
+  while(placed<want&&pool.length&&guard<400){
+    guard++;
+    var c5=pool.pop();
+    if(c5.small>=0||c5.taitai) continue;
+    if(S.smallSides){
+      var haveSide=0;
+      for(var sbi=0;sbi<f.smallbones.length;sbi++) if(f.smallbones[sbi].cellRef.side===c5.side) haveSide++;
+      if(haveSide>=S.smallSides[c5.side]) continue;
+    }
+    f.smallbones.push({cell:c5.i, x:c5.x, y:c5.y, ang:(c5.side===0?-Math.PI/2:Math.PI/2)+rnd(-0.5,0.5), state:'in', reveal:0, cellRef:c5});
+    c5.small=f.smallbones.length-1; placed++;
+  }
+  if(S.taitai){
+    var tc=null;
+    for(var ci6=0;ci6<f.cells.length;ci6++){
+      var c6=f.cells[ci6];
+      if(c6.col>=2&&c6.col<=4&&c6.row<=1&&c6.side===0&&c6.small<0){ tc=c6; break; } }
+    if(tc){ tc.taitai=true; f.taitaiCol=tc.col;
+      f.taitai={cell:tc.i, x:tc.x, y:tc.y, state:(G.run&&G.run.taitaiFound)?'done':'hidden', prog:0}; } }
+  f.aliveCount=0; f.totalCells=f.cells.length;
+  for(var ci7=0;ci7<f.cells.length;ci7++) if(f.cells[ci7].alive) f.aliveCount++;
+  return f;
+}
+function fishGeom(f){
+  var L=layout(), S=f.S;
+  f.fishLen=Math.min(L.plateR*1.95,W*0.84)*(S.len||1); f.sc=f.fishLen/300;
+  f.hMax=S.hMax*(f.fishLen/300)*(S.len?1.12:1);
+  f.xs=[];
+  for(var i=0;i<=f.N;i++) f.xs.push(-f.fishLen/2+f.fishLen*(i/f.N));
+  var colW=f.fishLen/f.N;
+  for(var ci=0;ci<f.cells.length;ci++){
+    var c=f.cells[ci], t=c.col/(f.N-1), hw=f.hMax*fishProfile(t);
+    var xC=-f.fishLen/2+f.fishLen*((c.col+0.5)/f.N), yb=(c.side===0?-hw:0), yt=(c.side===0?0:hw);
+    c.x=xC; c.y=yb+(yt-yb)*((c.row+0.5)/f.R); c.w=colW; c.h=Math.abs(yt-yb)/f.R; }
+  for(var si=0;si<f.segs.length;si++) f.segs[si].x=f.xs[si]+(f.fishLen/f.N)/2;
+  for(var bi=0;bi<f.smallbones.length;bi++){ var b=f.smallbones[bi], bc=f.cells[b.cell]; b.x=bc.x; b.y=bc.y; }
+  if(f.taitai){ var tcc=f.cells[f.taitai.cell]; f.taitai.x=tcc.x; f.taitai.y=tcc.y; } }
+function hwRaw(f,lx){ var t=clamp((lx+f.fishLen/2)/f.fishLen,0,1); return f.hMax*fishProfile(t); }
+function hwOf(f,lx){ return hwRaw(f,lx)+(f.S.open?f.spreadCur:0); }
+function offSide(f,side){ return (f.S.open)?((side===0?-1:1)*f.spreadCur):0; }
+function w2l(px,py){ var f=G.fish, L=layout(), dx=px-L.cx, dy=py-L.cy, c=Math.cos(-f.angCur), s=Math.sin(-f.angCur); return {x:dx*c-dy*s, y:dx*s+dy*c}; }
+function l2w(f,lx,ly){ var L=layout(), c=Math.cos(f.angCur), s=Math.sin(f.angCur); return {x:L.cx+lx*c-ly*s, y:L.cy+lx*s+ly*c}; }
+function pos(e){ var r=CV.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; }
+function onPD(e){
+  e.preventDefault(); audioInit();
+  var p=pos(e); G.ptr.x=p.x; G.ptr.y=p.y;
+  for(var i=G.buttons.length-1;i>=0;i--){
+    var b=G.buttons[i];
+    if(p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h){ sClick(); b.act(); return; } }
+  if(G.scene==='intro'){ G.scene='play'; G.bannerT=0; return; }
+  if(G.scene==='taitai'){ if(G.taitaiT>0.6) G.taitaiSkip=true; return; }
+  if(G.scene!=='play'||G.anim) return;
+  G.pressed=true; G.pressKick=1; tryPull(p);
+  if(!G.pull&&G.fish&&G.fish.S.open) tryOpenDrag(p); }
+function onPM(e){ var p=pos(e); G.ptr.x=p.x; G.ptr.y=p.y; }
+function onPU(){ if(G.pull) endPull(false,false); G.pressed=false; G.slipX=0; }
+function tryPull(p){
+  var f=G.fish; if(!f) return;
+  var tl=w2l(p.x,p.y), activeSides=f.S.flip?[f.side]:[0,1];
+  if(f.taitai&&f.taitai.state==='glint'&&activeSides.indexOf(f.cells[f.taitai.cell].side)>=0&&f.cells[f.taitai.cell].alive){
+    var d=Math.hypot(tl.x-f.taitai.x, tl.y-(f.taitai.y+offSide(f,f.cells[f.taitai.cell].side)));
+    if(d<26){ G.pull={kind:'t', t:0, x0:p.x, y0:p.y}; return; } }
+  for(var i=0;i<f.smallbones.length;i++){
+    var b=f.smallbones[i], bc=f.cells[b.cell];
+    if(b.state!=='in'||b.reveal<0.3) continue;
+    if(!bc.alive||activeSides.indexOf(bc.side)<0) continue;
+    var dd=Math.hypot(tl.x-b.x, tl.y-(b.y+offSide(f,bc.side)));
+    if(dd<20){ G.pull={kind:'s', b:b, t:0, x0:p.x, y0:p.y}; return; } }
+}
+// ほっけの『開き』: 露出した中骨を押さえ、頭か尾側へ物理的に引き開ける
+function tryOpenDrag(p){
+  var f=G.fish;
+  if(!f||!f.S.open||f.split>=1||G.scene!=='play'||G.anim||G.pull||G.openDrag) return false;
+  if(!splitReady(f)) return false;
+  var tl=w2l(p.x,p.y), pts=spinePts(f);
+  for(var i=2;i<f.N-2;i++){
+    var sy=pts[Math.min(i,f.N)].y;
+    if(Math.abs(tl.x-f.segs[i].x)<14&&Math.abs(tl.y-sy)<12){ G.openDrag={sx:f.segs[i].x, sy:sy, dir:0, prog:0}; sCreak(); return true; } }
+  return false;
+}
+function endPull(success,slipped){
+  var pl=G.pull; G.pull=null;
+  if(!pl) return;
+  if(success){
+    if(pl.kind==='t'&&G.fish&&G.fish.taitai){
+      G.fish.taitai.state='done'; G.run.taitaiFound=true; sTaitai();
+      popup('鯛の鯛、発見。', l2w(G.fish,G.fish.taitai.x,G.fish.taitai.y-30), 24, '#ffd98a', 2.2);
+      burst(l2w(G.fish,G.fish.taitai.x,G.fish.taitai.y), 16, '#fff3c9');
+      museumLabel('鯛の鯛 — 頭部奥より発見。標本に一本加わる。');
+    } else if(pl.b){
+      pl.b.state='pulled';
+      if(G.fish) G.fish.pulledCount++;
+      sPullDone();
+      popup('抜けた。', l2w(G.fish,pl.b.x,pl.b.y-24), 18, '#f3ead2', 1.2);
+      burst(l2w(G.fish,pl.b.x,pl.b.y), 8, '#efe6cf'); }
+  } else if(slipped&&pl.b){
+    popup('すべった…', l2w(G.fish,pl.b.x,pl.b.y-24), 15, '#e8d9b0', 1.0); }
+}
+function doRotate(){
+  var f=G.fish, S=f?f.S:null, L=layout();
+  if(G.scene!=='play'||!f||!S.rotate||G.anim) return;
+  if(G.pull) endPull(false,false);
+  G.anim='rot'; f.rotT=0; f.angFrom=f.angCur; f.angTo=(f.angTo===0?Math.PI:0);
+  noiseAt(0.3,300,0.08); sClick(); burst({x:L.cx+L.plateR*0.55,y:L.cy}, 10, '#b07a3e');
+}
+function doFlip(){
+  var f=G.fish, S=f?f.S:null;
+  if(G.scene!=='play'||!f||!S.flip||G.anim) return;
+  G.anim='flip'; f.flipT=0.001; toneAt(300,0.3,'sine',0.1,0,150); G.P=0; G.pull=null;
+}
+function splitReady(f){
+  var lo=Math.floor(f.N*0.28), hi=Math.ceil(f.N*0.72), tot=0, alive=0;
+  for(var i=0;i<f.cells.length;i++){
+    var c=f.cells[i];
+    if(c.col<lo||c.col>=hi||c.row>=f.R-2) continue;
+    tot++; if(c.alive) alive++; }
+  return tot>0&&alive/tot<=0.45;
+}
+function doOpen(){
+  var f=G.fish, S=f?f.S:null;
+  if(G.scene!=='play'||!f||!S.open||G.anim||G.openDrag) return;
+  if(!splitReady(f)){
+    popup('まだ中央の身が硬い。もう少し、剥がす。', {x:W/2,y:H*0.42}, 15, '#e8d9b0', 1.5);
+    toneAt(220,0.12,'square',0.06); return; }
+  G.anim='open'; f.splitT=0.001; G.P=0; if(G.pull) endPull(false,false);
+  toneAt(240,0.5,'sine',0.1,0,140); noiseAt(0.3,400,0.08);
+}
+function onKey(e){
+  var k=e.key;
+  if(k===' '||k==='Enter'){ e.preventDefault(); if(G.primary){ sClick(); G.primary(); } return; }
+  if(G.scene==='play'){
+    if(k==='r'||k==='R') doRotate();
+    if(k==='f'||k==='F') doFlip();
+    if(k==='o'||k==='O') doOpen(); }
+}
+CV.addEventListener('pointerdown',onPD,{passive:false});
+CV.addEventListener('pointermove',onPM,{passive:true});
+window.addEventListener('pointerup',onPU);
+window.addEventListener('pointercancel',onPU);
+window.addEventListener('keydown',onKey);
+document.addEventListener('visibilitychange',function(){ G.pressed=false; G.slipX=0; if(G.pull) endPull(false,false); if(G.openDrag) G.openDrag.closing=true; });
+function popup(text,wpos,size,col,life){
+  G.popups.push({text:text, x:wpos.x, y:wpos.y, t:0, life:life||1.4, size:size||18, col:col||'#f5eed8'});
+  if(G.popups.length>14) G.popups.shift();
+}
+function burst(wpos,n,col){
+  for(var i=0;i<n;i++)
+    G.parts.push({x:wpos.x, y:wpos.y, vx:rnd(-70,70), vy:rnd(-120,-10), rot:rnd(0,TAU), vr:rnd(-4,4),
+                  life:rnd(0.4,0.9), t:0, size:rnd(2,5), col:col, grav:180});
+  if(G.parts.length>320) G.parts.splice(0,G.parts.length-320);
+}
+function steam(wpos){
+  G.steams.push({x:wpos.x, y:wpos.y, t:0, life:rnd(1.4,2.4), dr:rnd(-8,8)});
+  if(G.steams.length>40) G.steams.shift();
+}
+function museumLabel(text){ G.label=text; G.labelT=0; }
+function shake(a){ G.shake=Math.max(G.shake,a); }
+function flash(col,a){ G.flashA=Math.max(G.flashA,a); G.flashCol=col; }
+function spawnFibers(f,c){
+  var tg=[];
+  for(var i=0;i<c.nb.length&&tg.length<2;i++){
+    var o=f.cells[c.nb[i]];
+    if(o.alive&&Math.random()<0.7) tg.push({x:o.x,y:o.y}); }
+  tg.push({x:f.segs[c.col].x, y:c.y*0.2});
+  for(var j=0;j<tg.length;j++)
+    G.fibers.push({x0:c.x, y0:c.y, x1:tg[j].x, y1:tg[j].y,
+      cx:(c.x+tg[j].x)/2+rnd(-3,3), cy:(c.y+tg[j].y)/2+rnd(-2,2)-2, t:0, life:0.12});
+  if(G.fibers.length>70) G.fibers.splice(0,G.fibers.length-70); }
+function spawnOpenFibers(f,lx){
+  var hwv=hwRaw(f,lx);
+  for(var i=0;i<2;i++){
+    var y0=rnd(-4,4), y1=(i%2?1:-1)*rnd(hwv*0.3,hwv*0.55);
+    G.fibers.push({x0:lx, y0:y0, x1:lx+rnd(-3,3), y1:y1, cx:lx+rnd(-3,3), cy:(y0+y1)/2+rnd(-2,2), t:0, life:0.14});
+  }
+  if(G.fibers.length>70) G.fibers.splice(0,G.fibers.length-70);
+}
+function liftFlakes(f,c){
+  var wp=l2w(f,c.x,c.y), n=2+Math.min(G.combo,10)*0.3;
+  for(var i=0;i<n;i++)
+    G.parts.push({x:wp.x+rnd(-4,4), y:wp.y+rnd(-3,3), vx:rnd(-28,28), vy:-rnd(60,120), rot:rnd(0,TAU), vr:rnd(-6,6),
+                  life:rnd(0.5,0.9), t:0, size:rnd(2.5,5.5), col:(Math.random()<0.5)?'#d9a96a':'#f3e2c0', grav:240});
+}
+function comboKill(){
+  if(G.t-G.lastKill>1.1) G.combo=0;
+  G.lastKill=G.t; G.combo++;
+  if(G.combo===3||G.combo===6||G.combo===10){
+    var txt=G.combo===3?'ほぐれる':(G.combo===6?'骨が見えた':'完食の気配');
+    popup(txt, {x:G.tip.x,y:G.tip.y-26}, 16, '#fff3d8', 1.1);
+    sCombo(G.combo); steam({x:G.tip.x,y:G.tip.y});
+    for(var i=0;i<4;i++)
+      G.parts.push({x:G.tip.x+rnd(-8,8), y:G.tip.y, vx:rnd(-40,40), vy:-rnd(70,130), rot:rnd(0,TAU), vr:rnd(-6,6),
+        life:rnd(0.4,0.8), t:0, size:rnd(2,4.5), col:'#f3e2c0', grav:220});
+  }
+}
+function curatorBreak(){
+  if(G.run.curatorDone) return;
+  G.run.curatorDone=true;
+  G.curator={text:'本日の朝食は、本日の事故現場となりました。', t:0, life:1.8};
+  toneAt(150,0.4,'triangle',0.07,0,90); }
+function killCell(f,c){
+  c.alive=false; c.hp=0; f.aliveCount--;
+  spawnFibers(f,c); liftFlakes(f,c); sPeel(); comboKill();
+  if(c.row===0){ // 身ごと強引に剥がした → 皮は不規則な裂け残りになる
+    var sk2=f.skins[c.side][c.col];
+    if(sk2&&sk2.alive){
+      sk2.alive=false; sk2.torn=true; f.skinTorn++; sRibcrack();
+      var wp2=l2w(f,c.x,c.y);
+      if(Math.random()<0.3){ popup('皮ごといった…',wp2,14,'#c98a5a',0.9); shake(3); }
+      for(var i2=0;i2<3;i2++)
+        G.parts.push({x:wp2.x+rnd(-5,5), y:wp2.y, vx:rnd(-35,35), vy:-rnd(30,80), rot:rnd(0,TAU), vr:rnd(-6,6),
+          life:rnd(0.4,0.8), t:0, size:rnd(2,4), col:'#3c2210', grav:250}); } }
+  if(c.small>=0){
+    var b=f.smallbones[c.small];
+    if(b&&b.state==='in'){ b.state='gone'; swallowBone(f,b); } }
+  if(c.taitai&&f.taitai&&f.taitai.state!=='done'){
+    f.taitai.state='gone'; G.run.taitaiSwallowed=true;
+    popup('…鯛の鯛を、飲み込んだ。', l2w(f,f.taitai.x,f.taitai.y-26), 17, '#e0b0a0', 2.4);
+    museumLabel('鯛の鯛 — 嚥下。標本は永遠に欠けたまま。');
+    sChiku(); shake(6); flash('#ff5040',0.08); }
+}
+function swallowBone(f,b){
+  f.swallowed++;
+  sChiku(); shake(6); flash('#ff5040',0.1);
+  popup('チクッ', l2w(f,b.x,b.y), 20, '#ff8877', 1.3);
+  if(!G.run.firstSwallow){
+    G.run.firstSwallow=true;
+    museumLabel('小骨1本目 — 所蔵先: 胃袋(貸出不可)。');
+  } else {
+    var rem=0;
+    for(var i=0;i<f.smallbones.length;i++) if(f.smallbones[i].state==='in') rem++;
+    museumLabel(rem>0?('小骨を飲み込んだ(口内ダメージ) — 残り '+rem+'本'):'小骨を飲み込んだ(口内ダメージ)'); }
+}
+function skinDeath(f,sk){
+  sk.alive=false;
+  var sSign=(sk.side===0?-1:1), off=offSide(f,sk.side);
+  var hwv=hwRaw(f,f.segs[sk.col].x);
+  var wp=l2w(f, f.segs[sk.col].x, sSign*hwv*0.86+off);
+  if(G.P>0.8){
+    // 強圧 → 不規則な皮の裂けが残る
+    sk.torn=true; f.skinTorn++; shake(4); sRibcrack();
+    popup('皮が裂けた…', wp, 15, '#c98a5a', 1.0);
+    for(var i=0;i<6;i++)
+      G.parts.push({x:wp.x+rnd(-5,5), y:wp.y, vx:rnd(-40,40), vy:-rnd(30,90), rot:rnd(0,TAU), vr:rnd(-7,7),
+        life:rnd(0.4,0.8), t:0, size:rnd(2,4.5), col:'#3c2210', grav:260});
+  } else {
+    // 弱い〜適圧 → 大きめの焦げ片と湯気(きれいに剥げた列として計上)
+    f.skinClean++; sSkinPeel(); steam(wp);
+    for(var i2=0;i2<5;i2++)
+      G.parts.push({x:wp.x+rnd(-6,6), y:wp.y, vx:rnd(-30,30), vy:-rnd(60,120), rot:rnd(0,TAU), vr:rnd(-7,7),
+        life:rnd(0.5,1.0), t:0, size:rnd(3,6.5), col:(i2%2)?'#4a2510':'#7a3f16', grav:240});
+    if(Math.random()<0.34) popup('皮、剥けた', wp, 14, '#e8b477', 0.9); }
+}
+function adjBoost(f,c){
+  if(!c.nb.length) return 1;
+  var dead=0;
+  for(var i=0;i<c.nb.length;i++) if(!f.cells[c.nb[i]].alive) dead++;
+  return 1+0.7*(dead/c.nb.length); }
+function breakSpine(f,si,reason){
+  var idx=-1;
+  for(var d=0;d<f.N;d++){
+    var a=si+Math.ceil(d/2)*((d%2===0)?1:-1);
+    if(a>=0&&a<f.N&&!f.segs[a].broken){ idx=a; break; } }
+  if(idx<0){ f.segs[si].stress=0.2; return; }
+  var sg=f.segs[idx];
+  sg.broken=true; sg.stress=0.3;
+  var tl=w2l(G.tip.x,G.tip.y);
+  sg.kink=(tl.y<0?1:-1)*rnd(0.45,0.8);
+  f.spineBreaks.push({idx:idx, kink:sg.kink, reason:reason});
+  sCrack(); shake(14); flash('#fff',0.3); G.slow=0.5;
+  popup('コキッ', l2w(f,sg.x,0), 40, '#d84c38', 2.0);
+  curatorBreak(); museumLabel('中骨 第'+(idx+1)+'椎骨 — '+reason+'で折損。元には戻らない。');
+  burst(l2w(f,sg.x,0), 10, '#efe6cf'); }
+function breakRib(f,rb){
+  rb.broken=true; rb.hp=0;
+  var S=f.S, anchorX=f.segs[rb.col].x, hwv=hwRaw(f,anchorX);
+  var pts=spinePts(f), pyi=(rb.side===0?-1:1);
+  var ry=pts[Math.min(rb.col,f.N)].y+pyi*hwv*0.6; // 実際の肋骨位置(spinePts+hwRaw)
+  var sname=S.flip?(rb.side===0?'表側':'裏側'):(rb.side===0?'左':'右');
+  f.ribBreaks.push({side:rb.side, no:rb.no, reason:'強圧', label:sname});
+  sRibcrack(); shake(8); flash('#fff',0.18);
+  popup('ピキッ', l2w(f,anchorX,ry), 24, '#d84c38', 1.6);
+  curatorBreak(); museumLabel(sname+'第'+rb.no+'肋骨 — 強圧で撓り。標本に赤が残る。'); }
+function nearestRib(f,si,side){
+  var best=null, bd=1e9;
+  for(var i=0;i<f.ribs.length;i++){
+    var rb=f.ribs[i];
+    if(rb.side!==side||rb.broken) continue;
+    var d=Math.abs(rb.col-si);
+    if(d<bd){ bd=d; best=rb; } }
+  return best; }
+function finishOpen(f){
+  G.openDrag=null; f.split=1; f.splitT=1;
+  sBoneHit(); shake(5);
+  popup('開いた。上下の身が、分かれた。', {x:W/2,y:H*0.40}, 18, '#f3ead2', 1.4);
+  burst(l2w(f,0,0), 14, '#efe6cf');
+  for(var i=2;i<f.N-2;i+=3) spawnOpenFibers(f,f.segs[i].x); }
+function updatePlay(dt){
+  var f=G.fish, S=f.S, L=layout();
+  if(G.anim==='rot'){
+    f.rotT+=dt/0.7;
+    if(f.rotT>=1){ f.angCur=f.angTo; G.anim=null; sBoneHit(); }
+    else f.angCur=lerp(f.angFrom,f.angTo,ease(f.rotT)); }
+  if(G.anim==='flip'){
+    f.flipT+=dt/0.6;
+    if(f.flipT>=1){ f.side=1-f.side; f.flipT=0; G.anim=null; sBoneHit(); } }
+  if(G.anim==='open'){
+    f.splitT+=dt/0.9;
+    if(f.splitT>=1){ f.splitT=1; f.split=1; G.anim=null; sBoneHit(); shake(5);
+      popup('開いた。上下の身が、分かれた。', {x:W/2,y:H*0.40}, 18, '#f3ead2', 1.4);
+      burst({x:L.cx,y:L.cy}, 14, '#efe6cf'); }
+    else f.split=ease(f.splitT); }
+  // 開きドラッグ(切れ目が指に追従・繊維が伸びてちぎれる・抵抗を返す)
+  if(G.openDrag){
+    var od=G.openDrag, tlO=w2l(G.ptr.x,G.ptr.y);
+    if(G.pressed){
+      var dxO=tlO.x-od.sx;
+      if(od.dir===0&&Math.abs(dxO)>6) od.dir=(dxO>0?1:-1);
+      if(od.dir!==0&&Math.abs(tlO.y-od.sy)<24){
+        var prog=clamp((tlO.x-od.sx)*od.dir/(f.fishLen*0.32),0,1);
+        if(prog>od.prog){
+          if(prog-od.prog>0.05) spawnOpenFibers(f,od.sx+od.dir*f.fishLen*0.32*prog);
+          if(Math.random()<0.35) sCreak();
+          if((od.prog<0.33&&prog>=0.33)||(od.prog<0.66&&prog>=0.66)){ shake(3); sRibcrack(); }
+          od.prog=prog; } }
+      if(od.prog>=1) finishOpen(f);
+    } else od.closing=true;
+    if(G.openDrag){
+      if(od.closing){
+        od.prog=Math.max(0,od.prog-dt*1.5);
+        if(od.prog<=0){ G.openDrag=null; noiseAt(0.1,260,0.05); } }
+      if(G.openDrag){ f.splitT=0; f.split=od.prog; } } }
+  f.spreadCur=f.hMax*0.55*ease(f.split);
+  G._openReady=(S.open&&f.split<0.9)?splitReady(f):false;
+  // 圧(押し始めの50msは箸先が一気に沈む・開き中は圧が抜ける)
+  if(G.pressed&&!G.pull&&!G.anim&&!G.openDrag){ G.P=Math.min(1,G.P+dt/0.9); G.pressT+=dt; }
+  else { G.P=Math.max(0,G.P-dt*3.5); G.pressT=0; }
+  G.pressKick=Math.max(0,G.pressKick-dt*14);
+  // 滑り(さば・皿の回転と一致する局部座標で)
+  if(S.slip&&G.pressed&&!G.pull&&!G.anim){
+    var pl=w2l(G.ptr.x,G.ptr.y), sf=(pl.x>0)?1:0.3;
+    G.slipX=Math.min(85,G.slipX+dt*(18+72*G.P)*sf);
+    if(G.P>0.3&&Math.random()<dt*6) burst({x:G.tip.x,y:G.tip.y+6},1,'#7a4520');
+  } else G.slipX=Math.max(0,G.slipX-dt*300);
+  // 箸先(弱圧で急に動かすと、指より遅れて身が滑る)
+  var tgx=G.ptr.x+Math.cos(f.angCur)*G.slipX, tgy=G.ptr.y+Math.sin(f.angCur)*G.slipX;
+  var ox=G.tip.x, oy=G.tip.y, rate=(G.pressed&&!G.anim)?(5.5+8.5*G.P):16;
+  G.tip.x+=(tgx-G.tip.x)*Math.min(1,dt*rate); G.tip.y+=(tgy-G.tip.y)*Math.min(1,dt*rate);
+  G.tipSpd=Math.hypot(G.tip.x-ox,G.tip.y-oy)/Math.max(dt,0.0001);
+  // 引き抜き
+  if(G.pull){
+    var pl2=G.pull, moved=Math.hypot(G.ptr.x-pl2.x0,G.ptr.y-pl2.y0);
+    if(moved>32) endPull(false,true);
+    else {
+      pl2.t+=dt/(pl2.kind==='t'?1.1:0.5);
+      if(pl2.t>=1) endPull(true,false);
+      else if(Math.random()<dt*3) burst({x:G.tip.x,y:G.tip.y},1,'#efe6cf'); } }
+  f.pullFlex=(G.pull&&G.pull.kind==='t')?(0.3+0.18*Math.sin(G.t*11)):0;
+  // 食べる・ストレス(開きドラッグ中は身を剥がさない)
+  if(G.pressed&&!G.pull&&!G.anim&&!G.openDrag&&G.P>0.02){
+    var tl=w2l(G.tip.x,G.tip.y);
+    var rT=26, r2=rT*rT;
+    var eff=(G.P<S.sweetLo)?(0.18*G.P):(G.P<=S.sweetHi?(0.85+0.65*G.P):1.85);
+    var hwA=hwRaw(f,tl.x);
+    var inFish=Math.abs(tl.y)<hwA+16;
+    if(inFish) f.flexDir=lerp(f.flexDir,(tl.y<0?1:-1),Math.min(1,dt*6));
+    // 皮(外側の帯)は独立した剥離対象・弱圧ではめくれ強圧では裂ける
+    var colHit=clamp(Math.floor((tl.x+f.fishLen/2)/(f.fishLen/f.N)),0,f.N-1);
+    var sHit=tl.y<0?0:1;
+    var sk=(S.flip)?((sHit===f.side)?f.skins[sHit][colHit]:null):f.skins[sHit][colHit];
+    if(sk&&sk.alive){
+      var sSign=(sHit===0?-1:1), off=offSide(f,sHit), rel=tl.y-off;
+      if(sSign*rel>=0.70*hwA&&sSign*rel<=hwA+9){
+        var sdps=dt*0.62*eff;
+        sk.hp-=sdps; sk.dmg=clamp(1-sk.hp/sk.max,0,1);
+        if(eff>1.0) sk.rift+=sdps; else sk.peel+=sdps;
+        if(sk.hp<=0) skinDeath(f,sk); } }
+    for(var ci=0;ci<f.cells.length;ci++){
+      var c=f.cells[ci];
+      if(!c.alive) continue;
+      if(S.flip&&c.side!==f.side) continue;
+      if(S.open&&f.split<0.9&&c.row>=f.R-2) continue; // 閉じた内側は、開くまで届かない
+      var offc=offSide(f,c.side), dx=c.x-tl.x, dy=(c.y+offc)-tl.y;
+      if(dx*dx+dy*dy>r2) continue;
+      var dps=0.62*eff*adjBoost(f,c);
+      if(S.shred&&G.P>0.86) dps=15;
+      c.hp-=dt*dps; c.dmg=clamp(1-(c.hp/c.max),0,1);
+      if(c.hp<=0) killCell(f,c); }
+    if(eff>0.5&&Math.random()<dt*7){
+      G.parts.push({x:G.tip.x+rnd(-8,8), y:G.tip.y+rnd(-8,8), vx:rnd(-40,40), vy:rnd(-60,0), rot:rnd(0,TAU), vr:rnd(-5,5),
+                    life:rnd(0.25,0.5), t:0, size:rnd(1.5,3), col:'#fff6e0', grav:60});
+      sPeel(); }
+    if(inFish){
+      var si=clamp(Math.floor((tl.x+f.fishLen/2)/(f.fishLen/f.N)),0,f.N-1);
+      var sg=f.segs[si];
+      var centerF=1-clamp(Math.abs(tl.y)/Math.max(hwA,1),0,1)*0.55;
+      if(G.P>S.sweetHi){
+        sg.stress+=dt*(G.P-S.sweetHi)*2.4*S.stressMul*centerF;
+        if(Math.random()<dt*4) sCreak(); }
+      if(G.tipSpd>320&&G.P>0.45) sg.stress+=dt*(G.tipSpd-320)*0.0016*S.stressMul*centerF;
+      if(sg.stress>=1) breakSpine(f,si,(G.P>0.9)?'強圧':((G.tipSpd>340)?'引きずり':'強圧'));
+      if(G.P>0.88&&Math.abs(tl.y)>hwA*0.45){
+        var rb=nearestRib(f,si,tl.y<0?0:1);
+        if(rb){
+          rb.hp-=dt*2.8;
+          if(Math.random()<dt*3) sCreak();
+          if(rb.hp<=0) breakRib(f,rb); } } } }
+  // ストレス減衰・露出・小骨の先端が覗く
+  var maxSt=0;
+  for(var i2=0;i2<f.N;i2++){ var sg2=f.segs[i2];
+    if(!(G.pressed&&G.P>S.sweetHi)) sg2.stress=Math.max(0,sg2.stress-dt*0.55);
+    if(sg2.stress>maxSt) maxSt=sg2.stress; }
+  if(maxSt<=0.01&&!G.pull) f.pullFlex=lerp(f.pullFlex,0,Math.min(1,dt*10));
+  for(var i3=0;i3<f.N;i3++){ var seg=f.segs[i3], ex=0;
+    for(var k=0;k<seg.cover.length;k++) if(!f.cells[seg.cover[k]].alive) ex++;
+    seg.expo=lerp(seg.expo,seg.cover.length?ex/seg.cover.length:0,Math.min(1,dt*10)); }
+  for(var i4=0;i4<f.ribs.length;i4++){ var rb2=f.ribs[i4], ex2=0;
+    for(var k2=0;k2<rb2.cover.length;k2++) if(!f.cells[rb2.cover[k2]].alive) ex2++;
+    rb2.expo=lerp(rb2.expo,rb2.cover.length?ex2/rb2.cover.length:0,Math.min(1,dt*10)); }
+  for(var i5=0;i5<f.smallbones.length;i5++){
+    var b=f.smallbones[i5];
+    if(b.state!=='in') continue;
+    var bc=f.cells[b.cell];
+    b.reveal=lerp(b.reveal,(bc.dmg>0.35)?1:0,Math.min(1,dt*5)); }
+  if(f.taitai&&f.taitai.state==='hidden'&&f.cells[f.taitai.cell].dmg>0.4) f.taitai.state='glint';
+  if(f.taitai&&f.taitai.state==='glint'){
+    if(Math.random()<dt*5){
+      var wp=l2w(f,f.taitai.x+rnd(-4,4),f.taitai.y+rnd(-4,4));
+      G.parts.push({x:wp.x, y:wp.y, vx:0, vy:-14, rot:0, vr:0, life:0.7, t:0, size:2.2, col:'#ffe9a8', grav:0}); }
+    if(Math.random()<dt*0.7) toneAt(rnd(1400,1800),0.2,'sine',0.03); }
+  if(f.aliveCount<=0&&G.scene==='play'){ stageClear(); return; }
+  G.timer-=dt;
+  var tsec=Math.ceil(G.timer);
+  if(G.timer<=5.05&&tsec<G.lastTick){ G.lastTick=tsec; sTick(); }
+  if(G.timer<=0){ stageFail(); return; }
+}
+function stageClear(){
+  var f=G.fish, S=f.S;
+  var rec={ si:G.stage, name:S.name, timeUsed:S.time-Math.max(0,G.timer),
+    spine:f.spineBreaks.slice(), ribs:f.ribBreaks.slice(), swallowed:f.swallowed, pulled:f.pulledCount,
+    leftover:0, spineKinks:[], skinClean:f.skinClean, skinTorn:f.skinTorn };
+  for(var i=0;i<f.segs.length;i++) if(f.segs[i].broken) rec.spineKinks.push({idx:i,kink:f.segs[i].kink});
+  rec.score=stageScore(rec);
+  G.run.records.push(rec);
+  G.scene='clearing'; G.clearT=0; G.clearClicks=0;
+  G.pressed=false; if(G.pull) endPull(false,false); G.openDrag=null; G.slipX=0; G.P=0;
+  sClear();
+  if(G.stage===0&&rec.spine.length===0&&rec.ribs.length===0&&!ZERO_PRAISED){
+    // 初めて第1膳を折らずに食べた者へ、標本室の不条理な賛辞(1回だけ)
+    ZERO_PRAISED=true; G.zeroPraise=true;
+    G.curator={text:'損傷ゼロ。朝食を、考古学的に完食されました。', t:-0.3, life:2.1};
+    toneAt(520,0.25,'triangle',0.05,0.3,760); } }
+function stageScore(rec){
+  var s=100-12*rec.spine.length-8*rec.ribs.length-3*rec.swallowed;
+  if(rec.skinClean) s+=Math.min(5,rec.skinClean*0.4);   // きれいに剥いだ皮は完全度に響く
+  if(rec.skinTorn) s-=Math.min(5,rec.skinTorn*0.8);     // 裂いた皮は標本の価値を削る
+  return Math.max(3,Math.min(100,Math.round(s))); }
+function stageFail(){
+  var f=G.fish;
+  f.leftoverPct=Math.round(100*f.aliveCount/f.totalCells);
+  G.scene='fail'; G.pressed=false; if(G.pull) endPull(false,false); G.openDrag=null; G.slipX=0; G.P=0;
+  sFail(); shake(8); }
+function avgScore(){
+  var r=G.run.records; if(!r.length) return 0;
+  var s=0;
+  for(var i=0;i<r.length;i++) s+=r[i].score;
+  var v=Math.round(s/r.length);
+  if(G.run.taitaiFound) v=Math.min(100,v+2);
+  return v;
+}
+function rankOf(){
+  var r=G.run.records, sp=0, tot=0;
+  for(var i=0;i<r.length;i++){ sp+=r[i].spine.length; tot+=r[i].spine.length+r[i].ribs.length; }
+  var avg=avgScore();
+  if(tot===0&&avg>=95&&G.run.taitaiFound) return '骨まで愛す男';
+  if(sp>=3) return '中骨粉砕機';
+  if(avg>=85) return '骨董品';
+  if(avg<50) return '身は逃げた';
+  if(G.run.taitaiFound&&avg>=70) return '鯛の鯛守';
+  return '丁寧な箸使い';
+}
+var TITLES=[
+ {id:'perfect', name:'骨まで愛す男', cond:'全膳折損ゼロ+鯛の鯛発見'},
+ {id:'antique', name:'骨董品', cond:'平均完全度85%以上'},{id:'guardian', name:'鯛の鯛守', cond:'鯛の鯛発見+平均70%'},
+ {id:'polite', name:'丁寧な箸使い', cond:'6膳完走'},{id:'crusher', name:'中骨粉砕機', cond:'折損3本以上(敬意)'},
+ {id:'escape', name:'身は逃げた', cond:'平均完全度50%未満'}
+];
+function earnedTitles(){
+  var avg=avgScore(), r=G.run.records, tot=0;
+  for(var i=0;i<r.length;i++) tot+=r[i].spine.length+r[i].ribs.length;
+  var set={polite:true};
+  if(avg>=85) set.antique=true;
+  if(tot>=3) set.crusher=true;
+  if(avg<50) set.escape=true;
+  if(G.run.taitaiFound&&avg>=70) set.guardian=true;
+  if(tot===0&&avg>=95&&G.run.taitaiFound) set.perfect=true;
+  if(G.save&&G.save.titles){
+    var ids=String(G.save.titles).split(',');
+    for(var j=0;j<ids.length;j++) if(ids[j]) set[ids[j]]=true;
+  }
+  return set;
+}
+function shareText(){
+  var avg=avgScore(), rank=rankOf();
+  var r=G.run.records, tot=0, firstDesc='折損ゼロ';
+  for(var i=0;i<r.length;i++) tot+=r[i].spine.length+r[i].ribs.length;
+  if(tot>0){
+    var first=null;
+    for(var j=0;j<r.length;j++){
+      if(r[j].spine.length){ first={n:r[j].name,b:'中骨第'+(r[j].spine[0].idx+1)+'椎骨・'+r[j].spine[0].reason}; break; }
+      if(r[j].ribs.length){ first={n:r[j].name,b:r[j].ribs[0].label+'第'+r[j].ribs[0].no+'肋骨・強圧'}; break; }
+    }
+    firstDesc=first?('折損'+tot+'本:'+first.n+'の'+first.b):('折損'+tot+'本');
+  }
+  var tai=G.run.taitaiFound?'鯛の鯛発見':(G.run.taitaiSwallowed?'鯛の鯛嚥下':'鯛の鯛未発見');
+  return '【焼き魚の骨を、一本も折らずに食べろ。】骨格完全度'+avg+'% '+firstDesc+' '+tai+' 称号『'+rank+'』';
+}
+function fallbackCopy(txt,done){
+  var ok=false;
+  try{
+    var ta=document.createElement('textarea');
+    ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+  }catch(e){ ok=false; }
+  done(ok);
+}
+function copyText(txt,okMsg,failMsg){
+  var done=function(ok){ popup(ok?okMsg:failMsg, {x:W/2,y:H*0.62}, 17, '#f0e6cc', 2.2); };
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(function(){ done(true); }, function(){ fallbackCopy(txt,done); });
+      return;
+    }
+  }catch(e){}
+  fallbackCopy(txt,done);
+}
+function doShare(){ copyText(shareText(),'共有文をコピーした。','コピー失敗。スクショで頼む。'); }
+function failRec(f){
+  var kn=[];
+  for(var i=0;i<f.segs.length;i++) if(f.segs[i].broken) kn.push({idx:i,kink:f.segs[i].kink});
+  return { spine:f.spineBreaks.slice(), ribs:f.ribBreaks.slice(), spineKinks:kn,
+           leftover:f.aliveCount/f.totalCells, swallowed:f.swallowed, pulled:f.pulledCount };
+}
+function failShareText(){
+  var f=G.fish, S=f.S;
+  var pct=f.leftoverPct||Math.round(100*f.aliveCount/f.totalCells);
+  var first='折損なし(だが遅い)';
+  if(f.spineBreaks.length) first='最初の折損:中骨第'+(f.spineBreaks[0].idx+1)+'椎骨('+f.spineBreaks[0].reason+')';
+  else if(f.ribBreaks.length) first='最初の折損:'+f.ribBreaks[0].label+'第'+f.ribBreaks[0].no+'肋骨';
+  return '【焼き魚の骨を、一本も折らずに食べろ。】第'+(G.stage+1)+'膳『'+S.name+'』 食べ残し'+pct+'% '+first+' 小骨嚥下'+f.swallowed+'本 『身は、逃げた。』';
+}
+function doFailShare(){ copyText(failShareText(),'この事故の記録をコピーした。','コピー失敗。スクショで頼む。'); }
+var SAVE_KEY='yakizakana_hone_v1';
+function loadSave(){
+  var s={bestAvg:0, leastBreaks:99, titles:''};
+  try{
+    var raw=localStorage.getItem(SAVE_KEY);
+    if(raw){
+      var o=JSON.parse(raw);
+      if(o&&typeof o==='object'){
+        s.bestAvg=(typeof o.bestAvg==='number')?o.bestAvg:0;
+        s.leastBreaks=(typeof o.leastBreaks==='number')?o.leastBreaks:99;
+        s.titles=String(o.titles||'');
+      }
+    }
+  }catch(e){}
+  return s;
+}
+function commitSave(){
+  var avg=avgScore(), r=G.run.records, tot=0;
+  for(var i=0;i<r.length;i++) tot+=r[i].spine.length+r[i].ribs.length;
+  var s=G.save;
+  G.prevBestAvg=s.bestAvg; G.prevLeastBrk=s.leastBreaks; // 更新前の値を退避(「前回ベスト」誤表示防止)
+  G.deltaAvg=avg-s.bestAvg; G.deltaBrk=tot-s.leastBreaks;
+  if(avg>s.bestAvg) s.bestAvg=avg;
+  if(tot<s.leastBreaks) s.leastBreaks=tot;
+  var set=earnedTitles(), arr=s.titles?s.titles.split(','):[];
+  for(var j=0;j<TITLES.length;j++) if(set[TITLES[j].id]&&arr.indexOf(TITLES[j].id)<0) arr.push(TITLES[j].id);
+  s.titles=arr.join(',');
+  try{ localStorage.setItem(SAVE_KEY,JSON.stringify(s)); }catch(e){}
+}
+function nextTarget(){
+  var avg=avgScore(), r=G.run.records, tot=0;
+  for(var i=0;i<r.length;i++) tot+=r[i].spine.length+r[i].ribs.length;
+  if(!G.run.taitaiFound) return '次は鯛の鯛を発見し、「鯛の鯛守」を狙う。';
+  if(tot>0) return '次は折損ゼロ、「骨まで愛す男」を狙う。';
+  if(avg<95) return '次は平均完全度95%を狙う。';
+  return '標本室に、新館を建てる日。';
+}
+function update(dt){
+  G.t+=dt;
+  if(G.slow>0){ G.slow-=dt; G.timeScale=0.28; }
+  else G.timeScale=lerp(G.timeScale,1,Math.min(1,dt*6));
+  G.shake=Math.max(0,G.shake-dt*30);
+  G.flashA=Math.max(0,G.flashA-dt*2.2);
+  G.hintT+=dt;
+  if(G.label){ G.labelT+=dt; if(G.labelT>2.8) G.label=null; }
+  if(G.curator){ G.curator.t+=dt; if(G.curator.t>G.curator.life) G.curator=null; }
+  if(G.motes.length<16&&Math.random()<dt*2) G.motes.push({x:rnd(0,W),y:rnd(0,H*0.7),ph:rnd(0,TAU),r:rnd(0.8,2)});
+  for(var i=0;i<G.motes.length;i++){ var m=G.motes[i]; m.ph+=dt*0.5; m.x+=Math.sin(m.ph)*dt*6; m.y-=dt*3; if(m.y<-5){ m.y=H*0.7; m.x=rnd(0,W); } }
+  for(var p=G.parts.length-1;p>=0;p--){
+    var pa=G.parts[p]; pa.t+=dt;
+    if(pa.t>=pa.life){ G.parts.splice(p,1); continue; }
+    pa.vy+=pa.grav*dt; pa.x+=pa.vx*dt; pa.y+=pa.vy*dt; pa.rot+=pa.vr*dt; }
+  for(var fb=G.fibers.length-1;fb>=0;fb--){ var fo=G.fibers[fb]; fo.t+=dt; if(fo.t>=fo.life) G.fibers.splice(fb,1); }
+  for(var s=G.steams.length-1;s>=0;s--){ var st=G.steams[s]; st.t+=dt; if(st.t>=st.life) G.steams.splice(s,1); }
+  for(var po=G.popups.length-1;po>=0;po--){ var pp=G.popups[po]; pp.t+=dt; if(pp.t>=pp.life) G.popups.splice(po,1); }
+  if(G.scene==='intro'){
+    G.bannerT+=dt;
+    if(G.bannerT>2.6) G.scene='play';
+  } else if(G.scene==='play'){    updatePlay(dt);
+  } else if(G.scene==='clearing'){
+    G.clearT+=dt;
+    var want=Math.floor(G.clearT/0.3);
+    if(want>G.clearClicks&&want<=4){ G.clearClicks=want; sBoneHit(); }
+    var lim=(G.zeroPraise?2.05:1.55); // 零傷賛辞テロップ(1.8秒)を膳間メッセージにかぶせない
+    if(G.clearT>lim){
+      G.zeroPraise=false;
+      if(G.stage>=5){ G.scene='taitai'; G.taitaiT=0; G.taitaiSkip=false; G.taitaiBell=false; sDrone(); if(G.run.taitaiFound) sTaitai(); }
+      else G.scene='inter'; }
+  } else if(G.scene==='taitai'){
+    G.taitaiT+=dt;
+    var limit=(G.run.taitaiFound?3.6:2.0);
+    if(G.taitaiSkip) G.taitaiT=limit+1;
+    if(G.taitaiT>limit){ G.scene='result'; if(!G.run.saved){ G.run.saved=true; commitSave(); } } }
+  if(G.scene==='result'&&!G.run.saved){ G.run.saved=true; commitSave(); }
+}
+var BGC=null;
+function buildBgC(){
+  var m=20, w=Math.max(2,Math.ceil(W+2*m)), h=Math.max(2,Math.ceil(H));
+  var c=document.createElement('canvas');
+  c.width=Math.round(w*DPR); c.height=Math.round(h*DPR);
+  var x2=c.getContext('2d');
+  x2.scale(DPR,DPR);
+  x2.fillStyle='#ded2bc'; x2.fillRect(0,0,w,h);
+  x2.save();
+  x2.translate(W*0.25+m,0); x2.rotate(-0.32);
+  for(var i=0;i<3;i++){
+    var g=x2.createLinearGradient(-60+i*130,0,60+i*130,0);
+    g.addColorStop(0,'rgba(255,250,230,0)'); g.addColorStop(0.5,'rgba(255,250,230,0.34)'); g.addColorStop(1,'rgba(255,250,230,0)');
+    x2.fillStyle=g; x2.fillRect(-60+i*130,-80,120,H*1.6); }
+  x2.restore();
+  var vg=x2.createLinearGradient(0,H*0.6,0,H);
+  vg.addColorStop(0,'rgba(90,60,30,0)'); vg.addColorStop(1,'rgba(90,60,30,0.22)');
+  x2.fillStyle=vg; x2.fillRect(0,H*0.6,w,H*0.4+1);
+  BGC={cv:c, w:w, m:m}; }
+function drawBg(){
+  var sway=Math.sin(G.t*0.07)*12;
+  X.drawImage(BGC.cv,-BGC.m+sway,0,BGC.w,H);
+  X.fillStyle='rgba(120,90,40,0.16)';
+  for(var m=0;m<G.motes.length;m++){
+    var mo=G.motes[m];
+    X.beginPath(); X.arc(mo.x,mo.y+Math.sin(mo.ph*0.7)*4,mo.r,0,TAU); X.fill();
+  }
+}
+function drawShelf(){
+  var L=layout(), h=L.shelfH;
+  X.fillStyle='#17130f'; X.fillRect(0,0,W,h);
+  X.fillStyle='rgba(190,150,70,0.85)'; X.fillRect(0,h-2,W,2);
+  X.font='600 10px '+SANS; X.textAlign='left'; X.textBaseline='middle';
+  X.fillStyle='rgba(214,190,130,0.65)'; X.fillText('標 本 棚',10,h/2-9);
+  X.font='600 9px '+SANS; X.fillText('本日の骨格',10,h/2+8);
+  var recs=G.run?((G.scene==='clearing')?G.run.records.slice(0,-1):G.run.records):[];
+  var slotW=Math.min(64,(W-80)/6), x0=W/2-((Math.min(6,Math.max(recs.length,1)))*slotW)/2;
+  for(var i=0;i<Math.min(6,recs.length);i++)
+    drawSpecimen(x0+i*slotW+slotW/2, h/2, slotW*0.72, h*0.72, STAGES[recs[i].si], recs[i], true);
+  if(recs.length===0){
+    X.font='600 11px '+SANS; X.textAlign='center'; X.fillStyle='rgba(214,190,130,0.4)'; X.fillText('完食した骨格が、ここに並ぶ。', W/2, h/2); }
+  if(G.label){
+    var a=clamp(1-(G.labelT-2.0)/0.8,0,1)*0.92, tw=Math.min(W-20,340);
+    X.fillStyle='rgba(20,15,10,'+a+')'; X.fillRect(W/2-tw/2,h+4,tw,26);
+    X.strokeStyle='rgba(190,150,70,'+a+')'; X.strokeRect(W/2-tw/2,h+4,tw,26);
+    X.font='600 11px '+SERIF; X.textAlign='center'; X.fillStyle='rgba(240,225,190,'+a+')'; var shortLabel=G.label.length>34?G.label.slice(0,33)+'…':G.label;
+    X.fillText(shortLabel, W/2, h+18); } }
+var PLC={r:-1,cv:null,ox:0,oy:0};
+function drawPlate(L){
+  var r=L.plateR;
+  if(!PLC.cv||Math.abs(PLC.r-r)>0.5){
+    var m=12, w=Math.ceil(r*2.16+m*2), h=Math.ceil(r*1.2+m*2);
+    var c=document.createElement('canvas');
+    c.width=Math.round(w*DPR); c.height=Math.round(h*DPR);
+    var x2=c.getContext('2d'); x2.scale(DPR,DPR);
+    var cx=w/2-5, cy=h/2-9;
+    x2.fillStyle='rgba(80,55,25,0.25)';
+    x2.beginPath(); x2.ellipse(cx+5,cy+9,r*1.02,r*0.6,0,0,TAU); x2.fill();
+    var g=x2.createRadialGradient(cx-r*0.3,cy-r*0.35,r*0.1,cx,cy,r);
+    g.addColorStop(0,'#fdfcf8'); g.addColorStop(0.75,'#f1ece1'); g.addColorStop(1,'#d9d0bd');
+    x2.fillStyle=g;
+    x2.beginPath(); x2.ellipse(cx,cy,r,r*0.6,0,0,TAU); x2.fill();
+    x2.strokeStyle='rgba(140,120,80,0.35)'; x2.lineWidth=1.4;
+    x2.beginPath(); x2.ellipse(cx,cy,r*0.9,r*0.54,0,0,TAU); x2.stroke();
+    PLC={r:r, cv:c, ox:cx, oy:cy}; }
+  X.drawImage(PLC.cv,L.cx-PLC.ox,L.cy-PLC.oy,PLC.cv.width/DPR,PLC.cv.height/DPR);
+}
+function drawBrothLocal(L){
+  var wob=Math.sin(G.t*2.1)*3;
+  X.save();
+  X.beginPath(); X.ellipse(0,0,L.plateR*0.88,L.plateR*0.52,0,0,TAU); X.clip();
+  var jg=X.createLinearGradient(0,0,L.plateR*0.8,0);
+  jg.addColorStop(0,'rgba(90,45,15,0)'); jg.addColorStop(1,'rgba(105,52,18,0.55)');
+  X.fillStyle=jg; X.fillRect(0,-L.plateR*0.52,L.plateR*0.8,L.plateR*1.05);
+  X.fillStyle='rgba(160,110,50,0.35)';
+  X.beginPath(); X.ellipse(L.plateR*0.62,wob*0.4,L.plateR*0.2,L.plateR*0.13,wob*0.01,0,TAU); X.fill();
+  X.restore();
+}
+function pilePos(){ var L=layout(); return {x:L.cx-L.plateR*0.66, y:L.cy+L.plateR*0.4}; }
+var PC={};
+function palRows(si,pal){
+  var key=si+pal.skin;
+  if(PC[key]) return PC[key];
+  var base=[mixCol(pal.flesh,'#fff2d8',0.18),pal.flesh,pal.deep];
+  var out=[[],[],[]];
+  for(var q=0;q<=16;q++){
+    var t=q/16*0.35;
+    out[0].push(mixCol(base[0],'#fff8ea',t));
+    out[1].push(mixCol(base[1],'#fff8ea',t));
+    out[2].push(mixCol(base[2],'#fff8ea',t)); }
+  PC[key]=out; return out; }
+function fishPath(f){
+  var N=f.N, hl=f.fishLen*0.075;
+  var sm=(f.S.flip)?(((f.flipT<0.5? f.side:1-f.side)===0)?-1:1):0;
+  X.beginPath();
+  if(sm===0){
+    X.moveTo(f.xs[0]-hl,0);
+    X.quadraticCurveTo(f.xs[0]-hl*0.25,-hwOf(f,f.xs[0])*1.04,f.xs[0]+2,-hwOf(f,f.xs[0]));
+    for(var i=1;i<=N;i++) X.lineTo(f.xs[i],-hwOf(f,f.xs[i]));
+    X.lineTo(f.xs[N]+f.fishLen*0.05,-hwOf(f,f.xs[N])*0.5); X.lineTo(f.xs[N]+f.fishLen*0.045,0); X.lineTo(f.xs[N]+f.fishLen*0.05,hwOf(f,f.xs[N])*0.5);
+    for(var j=N;j>=0;j--) X.lineTo(f.xs[j],hwOf(f,f.xs[j]));
+    X.quadraticCurveTo(f.xs[0]-hl*0.25,hwOf(f,f.xs[0])*1.04,f.xs[0]-hl,0);
+    X.closePath();
+  } else {
+    X.moveTo(f.xs[0]-hl,0);
+    X.quadraticCurveTo(f.xs[0]-hl*0.25,sm*hwOf(f,f.xs[0])*1.04,f.xs[0]+2,sm*hwOf(f,f.xs[0]));
+    for(var i2=1;i2<=N;i2++) X.lineTo(f.xs[i2],sm*hwOf(f,f.xs[i2]));
+    X.lineTo(f.xs[N]+f.fishLen*0.05,sm*hwOf(f,f.xs[N])*0.5); X.lineTo(f.xs[N]+f.fishLen*0.045,0);
+    X.closePath();
+  }
+}
+function spinePts(f){
+  var pts=[], a=0, yc=0, segW=f.fishLen/f.N;
+  for(var i=0;i<=f.N;i++){
+    var bend=0, j0=Math.max(0,i-2), j1=Math.min(f.N-1,i+1);
+    for(var j=j0;j<=j1;j++){
+      var sg=f.segs[j], w=Math.max(0,1-Math.abs((j+0.5)-i)/2.4);
+      bend+=sg.stress*w*10*f.sc*f.flexDir;
+      if(f.pullFlex>0.02&&Math.abs(j-f.taitaiCol)<=1) bend+=f.pullFlex*w*f.sc*8*((j%2)?1:-1); }
+    if(i>0){
+      var sg2=f.segs[i-1];
+      if(sg2.broken) a=clamp(a+sg2.kink,-1.1,1.1);
+      yc+=Math.tan(a)*segW; }
+    pts.push({x:f.xs[i], y:yc+bend}); }
+  return pts; }
+function drawFishAll(L){
+  var f=G.fish, S=f.S;
+  X.save();
+  X.translate(L.cx,L.cy); X.rotate(f.angCur);
+  if(S.flip){
+    var sc=Math.cos(Math.PI*f.flipT), sm=(f.flipT<0.5)?sc:-sc;
+    if(Math.abs(sm)<0.02) sm=0.02;
+    X.scale(1,sm);
+  }
+  var drawnSide0=S.flip?(f.flipT<0.5? f.side:1-f.side):0;
+  var drawnSides=S.flip?[drawnSide0]:[0,1];
+  // 身(共通輪郭にクリップされた、隙間のない升目・色は膳ごと16段階キャッシュ)
+  X.save(); fishPath(f); X.clip();
+  var tlD=(G.pressed&&!G.pull&&!G.anim&&!G.openDrag&&G.P>0.05&&G.scene==='play')?w2l(G.tip.x,G.tip.y):null;
+  for(var ci=0;ci<f.cells.length;ci++){
+    var c=f.cells[ci];
+    if(!c.alive||drawnSides.indexOf(c.side)<0) continue;
+    var pal=(S.flip&&c.side===1)?S.pal1:S.pal;
+    var CC=palRows(f.si,pal);
+    var dmg=clamp(c.dmg,0,1);
+    var rt=(c.row===f.R-1)?2:((c.row===0)?0:1);
+    var col=(S.slip)?CC[1][0]:CC[rt][Math.min(16,Math.round(dmg*16))];
+    var offc=offSide(f,c.side), cy=c.y+offc, ch=c.h;
+    if(S.open&&f.split<0.9&&c.row>=f.R-2){ cy=c.y*0.45+offc; ch=c.h*0.35; } // 閉じた内側は中骨にへばりつく
+    if(tlD){
+      var dd=Math.hypot(c.x-tlD.x,(c.y+offc)-tlD.y);
+      if(dd<34){ cy+=-(c.y<0?1:-1)*(2+3*G.P)*(1-dd/34); ch=Math.max(2,ch-(1+2*G.P)*(1-dd/34)); }
+    }
+    X.fillStyle=col;
+    X.fillRect(c.x-c.w/2,cy-ch/2,c.w+0.5,ch);
+    // dmg段階進行: 0.25白筋 → 0.6裂け目 → 0.85骨まで届く欠損
+    if(dmg>0.25){
+      var ph=cellHash(c.col,c.row);
+      X.strokeStyle='rgba(255,252,240,'+(0.45+0.45*dmg)+')'; X.lineWidth=1;
+      if(dmg<0.6){
+        X.beginPath(); X.moveTo(c.x-c.w*0.35,cy-ch*(0.2+ph*0.3));
+        X.quadraticCurveTo(c.x+c.w*0.05,cy+ch*0.15,c.x+c.w*0.38,cy-ch*(0.1+ph*0.2)); X.stroke();
+      } else {
+        var n2=(dmg>0.85)?3:2;
+        for(var m=0;m<n2;m++){ X.beginPath(); X.moveTo(c.x-c.w*0.4+ph*6,cy-ch*0.4+m*ch*0.3); X.lineTo(c.x+c.w*(0.1+ph*0.3)+m*3,cy+ch*0.35-m*2); X.stroke(); }
+        if(dmg>0.85){
+          X.fillStyle='rgba(46,28,14,0.8)';
+          X.beginPath(); X.ellipse(c.x+(ph-0.5)*c.w*0.4,cy+ch*0.08,c.w*0.3,ch*0.3,0,0,TAU); X.fill();
+          X.fillStyle='rgba(248,242,228,0.85)';
+          X.beginPath(); X.ellipse(c.x+(ph-0.5)*c.w*0.4,cy+ch*0.26,c.w*0.16,ch*0.13,0,0,TAU); X.fill();
+        }
+      }
+    }
+  }
+  for(var bi=0;bi<f.smallbones.length;bi++){
+    var b=f.smallbones[bi];
+    if(b.state!=='in'||b.reveal<0.25) continue;
+    var bc=f.cells[b.cell];
+    if(!bc.alive||drawnSides.indexOf(bc.side)<0) continue;
+    var boff=offSide(f,bc.side), len=7+b.reveal*5;
+    var ex=Math.cos(b.ang)*len, ey=Math.sin(b.ang)*len;
+    X.strokeStyle='rgba(40,30,20,0.85)'; X.lineWidth=1.6;
+    X.beginPath(); X.moveTo(b.x-ex*0.4,b.y+boff-ey*0.4); X.lineTo(b.x+ex,b.y+boff+ey); X.stroke();
+    if(b.reveal>0.5){ X.fillStyle='rgba(255,255,255,0.8)'; X.beginPath(); X.arc(b.x+ex,b.y+boff+ey,1.4,0,TAU); X.fill(); }
+  }
+  X.restore(); // clip解除
+  for(var fi=0;fi<G.fibers.length;fi++){
+    var fo=G.fibers[fi], al=1-fo.t/fo.life;
+    X.strokeStyle='rgba(232,200,144,'+(0.85*al)+')'; X.lineWidth=1.1;
+    X.beginPath(); X.moveTo(fo.x0,fo.y0); X.quadraticCurveTo(fo.cx,fo.cy,fo.x1,fo.y1); X.stroke();
+  }
+  if(G.openDrag){
+    var od=G.openDrag, fx=od.sx+od.dir*f.fishLen*0.32*od.prog;
+    X.strokeStyle='rgba(255,250,238,0.9)'; X.lineWidth=1.4;
+    X.beginPath();
+    for(var oi=0;oi<4;oi++){ var yy=oi*3-4.5; X.moveTo(fx-2+((oi%2)?2:-2), yy-1.5); X.lineTo(fx+2-((oi%2)?2:0), yy+1.5); }
+    X.stroke();
+  }
+  drawBones(f,drawnSides);
+  drawSkinBands(f,drawnSides);
+  var headAlive=0, tailAlive=0;
+  for(var k2=0;k2<f.cells.length;k2++){
+    var cc=f.cells[k2];
+    if(!cc.alive) continue;
+    if(cc.col<=1) headAlive++;
+    if(cc.col>=f.N-2) tailAlive++;
+  }
+  var pal2=(S.flip&&drawnSide0===1)?S.pal1:S.pal;
+  var hSides=(drawnSides.length===2)?[-1,1]:[(drawnSide0===0?-1:1)];
+  var hwv=hwRaw(f,f.xs[0]), Fl=f.fishLen;
+  if(headAlive>2){
+    X.fillStyle=mixCol(pal2.skin,'#140a04',0.32);
+    for(var hs=0;hs<hSides.length;hs++){
+      var sg2=hSides[hs];
+      X.beginPath();
+      X.moveTo(f.xs[0]+Fl*0.06,sg2*hwv*0.92);
+      X.quadraticCurveTo(f.xs[0]-Fl*0.01,sg2*hwv*0.98,f.xs[0]-Fl*0.07,sg2*hwv*0.35);
+      X.lineTo(f.xs[0]-Fl*0.07,0); X.closePath(); X.fill();
+    }
+    X.strokeStyle='rgba(30,18,8,0.5)'; X.lineWidth=1.2;
+    X.beginPath(); X.moveTo(f.xs[0]+Fl*0.045,hSides[0]*hwv*0.75);
+    X.quadraticCurveTo(f.xs[0]+Fl*0.02,0,f.xs[0]+Fl*0.045,hSides[hSides.length-1]*hwv*0.75); X.stroke();
+    if(!(S.flip&&drawnSide0===1)){ // 眼(白身側にはない)
+      X.fillStyle='#e8e0cc'; X.beginPath(); X.arc(f.xs[0]-Fl*0.012,hSides[0]*hwv*0.5,3.1*f.sc,0,TAU); X.fill();
+      X.fillStyle='#1a120a'; X.beginPath(); X.arc(f.xs[0]-Fl*0.012,hSides[0]*hwv*0.5,1.5*f.sc,0,TAU); X.fill();
+    }
+  }
+  if(tailAlive>2){
+    var hwv2=hwRaw(f,f.xs[f.N]);
+    X.fillStyle='rgba(50,30,14,0.6)';
+    for(var ts=0;ts<hSides.length;ts++){
+      X.beginPath();
+      X.moveTo(f.xs[f.N],hSides[ts]*hwv2*0.5); X.lineTo(f.xs[f.N]+Fl*0.05,hSides[ts]*hwv2*0.55);
+      X.lineTo(f.xs[f.N]+Fl*0.043,0); X.closePath(); X.fill();
+    }
+    X.strokeStyle='rgba(40,24,10,0.5)'; X.lineWidth=1;
+    for(var tr=-1;tr<=1;tr++){ X.beginPath(); X.moveTo(f.xs[f.N],hSides[0]*hwv2*0.2*tr); X.lineTo(f.xs[f.N]+Fl*0.04,hSides[0]*hwv2*0.4*tr); X.stroke(); }
+  }
+  if(f.taitai&&f.taitai.state==='glint'&&f.cells[f.taitai.cell].alive){
+    var tw=Math.sin(G.t*8)*0.5+0.5;
+    drawTaiTai(f.taitai.x,f.taitai.y+offSide(f,f.cells[f.taitai.cell].side)-3,9+tw*3,'rgba(255,240,200,'+(0.55+0.4*tw)+')');
+  }
+  X.restore();
+}
+function drawSkinBands(f,drawnSides){
+  var S=f.S;
+  for(var si=0;si<drawnSides.length;si++){
+    var s=drawnSides[si], sSign=(s===0?-1:1), off=offSide(f,s);
+    var pal=(S.flip&&s===1)?S.pal1:S.pal;
+    if(!f._sg) f._sg={};
+    var sgc=f._sg[s];
+    if(!sgc||sgc.h!==Math.round(f.hMax)||sgc.off!==Math.round(off)){
+      var gr=X.createLinearGradient(0,sSign*f.hMax+off,0,sSign*f.hMax*0.66+off);
+      gr.addColorStop(0,mixCol(pal.skin,'#1a0d05',0.5));
+      gr.addColorStop(0.5,pal.skin);
+      gr.addColorStop(1,mixCol(pal.skin,'#f5e6c8',0.3));
+      f._sg[s]=sgc={h:Math.round(f.hMax), off:Math.round(off), g:gr};
+    }
+    var col=0;
+    while(col<f.N){
+      if(!f.skins[s][col].alive){ col++; continue; }
+      var e=col;
+      while(e<f.N&&f.skins[s][e].alive) e++;
+      X.beginPath();
+      for(var k=col;k<=e;k++){ var hwv=hwRaw(f,f.xs[k]); if(k===col) X.moveTo(f.xs[k],sSign*hwv+off); else X.lineTo(f.xs[k],sSign*hwv+off); }
+      for(var k2=e;k2>=col;k2--) X.lineTo(f.xs[k2],sSign*hwRaw(f,f.xs[k2])*0.72+off);
+      X.closePath();
+      X.fillStyle=sgc.g; X.fill();
+      X.save(); X.clip();
+      for(var m=col;m<e;m++){
+        var mx=f.segs[m].x, mw=hwRaw(f,f.segs[m].x);
+        if(m%3===0){ X.fillStyle='rgba(28,13,6,0.34)'; X.fillRect(mx-2,sSign*(mw+off),4,sSign*mw*0.4); }
+        var hsh=cellHash(m,s);
+        if(hsh<0.4){
+          X.fillStyle='rgba(20,10,4,0.3)';
+          X.beginPath(); X.arc(mx+(hsh-0.2)*10,sSign*mw*(0.75+hsh*0.15)+off,1.3+f.sc,0,TAU); X.fill();
+        }
+      }
+      // 消滅前の損傷段階: 0.30焦げ水疱+裂線 / 0.60身側がめくれて淡色身が覗く / 0.85裂け口が隣列へ
+      for(var dcol=col;dcol<e;dcol++){
+        var sk2=f.skins[s][dcol];
+        if(!sk2.alive||sk2.dmg<0.28) continue;
+        var dm=sk2.dmg, bx=f.segs[dcol].x, hw2=hwRaw(f,bx), ph=cellHash(dcol*7,s);
+        var peelW=(sk2.peel+0.001)/(sk2.peel+sk2.rift+0.001); // 弱圧=めくれ / 強圧=裂け
+        X.fillStyle='rgba(26,12,5,'+(0.2+0.35*dm)+')';
+        X.beginPath(); X.arc(bx+(ph-0.5)*8,sSign*hw2*0.9+off,1.4+f.sc+dm*2.2,0,TAU); X.fill();
+        var nCr=(dm>=0.6?2:1)+(peelW<0.5?1:0);
+        X.strokeStyle='rgba(22,10,4,'+(0.3+0.45*dm)+')'; X.lineWidth=1;
+        for(var cj=0;cj<nCr;cj++){
+          X.beginPath();
+          X.moveTo(bx-4+ph*7,sSign*hw2*0.97+off);
+          X.quadraticCurveTo(bx+(cj-1)*3,sSign*hw2*0.86+off,bx-3+cj*3+ph*6,sSign*hw2*(0.78+ph*0.08)+off);
+          X.stroke();
+        }
+        if(dm>=0.6){
+          var kk=(dm-0.6)/0.4, lift=2+3*kk*peelW+1*(1-peelW);
+          var yEdge=sSign*hw2*0.72+off, yIn=yEdge-sSign*lift;
+          X.fillStyle='rgba(250,244,226,'+(0.45+0.45*kk)+')';
+          X.fillRect(bx-4,Math.min(yEdge,yIn),8,lift);
+          X.fillStyle='rgba(24,12,5,'+(0.4+0.4*kk)+')';
+          X.beginPath();
+          X.moveTo(bx-4,yIn);
+          X.quadraticCurveTo(bx,yIn-sSign*2,bx+4,yIn);
+          X.lineTo(bx+4,yIn+sSign*1.2); X.lineTo(bx-4,yIn+sSign*1.2);
+          X.closePath(); X.fill();
+        }
+        if(dm>=0.85){
+          X.strokeStyle='rgba(18,8,3,'+(0.5+0.3*dm)+')'; X.lineWidth=1.2;
+          var dirX=(ph<0.5?-1:1);
+          X.beginPath();
+          X.moveTo(bx+dirX*4,sSign*hw2*0.9+off);
+          X.quadraticCurveTo(bx+dirX*10,sSign*hw2*0.84+off,bx+dirX*15,sSign*hw2*(0.8+ph*0.1)+off);
+          X.stroke();
+        }
+      }
+      X.restore();
+      col=e;
+    }
+    X.fillStyle=mixCol(pal.skin,'#140a04',0.42);
+    for(var t2=0;t2<f.N;t2++){
+      if(f.skins[s][t2].alive||!f.skins[s][t2].torn) continue;
+      var tw2=hwRaw(f,f.segs[t2].x), bx2=f.segs[t2].x;
+      for(var jg=0;jg<3;jg++){
+        var h2=cellHash(t2*3+jg,s);
+        X.beginPath(); X.moveTo(bx2-4+h2*8,sSign*tw2+off);
+        X.lineTo(bx2-2+h2*8,sSign*tw2*0.86+off);
+        X.lineTo(bx2+h2*6,sSign*tw2+off);
+        X.closePath(); X.fill();
+      }
+    }
+  }
+}
+function drawTaiTai(x,y,s,col){
+  X.save(); X.translate(x,y);
+  X.fillStyle=col; X.strokeStyle=col; X.lineWidth=1;
+  X.beginPath();
+  X.moveTo(-s,-s*0.45); X.quadraticCurveTo(0,-s*0.85,s*0.6,-s*0.3); X.lineTo(s*0.6,s*0.3);
+  X.quadraticCurveTo(0,s*0.85,-s,s*0.45); X.quadraticCurveTo(-s*0.4,0,-s,-s*0.45);
+  X.closePath(); X.fill();
+  X.beginPath(); X.moveTo(-s*1.05,0); X.lineTo(-s*1.45,-s*0.5); X.lineTo(-s*1.45,s*0.5); X.closePath(); X.fill();
+  X.beginPath(); X.arc(-s*0.2,-s*0.12,s*0.1,0,TAU); X.fill();
+  X.restore();
+}
+function drawBones(f,drawnSides){
+  var pts=spinePts(f);
+  var openReady=G._openReady; // 開き準備ができたら中骨が薄く覗く(つまむ目安)
+  for(var i=0;i<f.N;i++){
+    var sg=f.segs[i];
+    if(sg.expo<0.05&&!openReady) continue;
+    var p0=pts[i], p1=pts[i+1];
+    var mx=(p0.x+p1.x)/2, my=(p0.y+p1.y)/2;
+    X.lineCap='round';
+    if(sg.broken){
+      var dx=p1.x-p0.x, dy=p1.y-p0.y, dl=Math.max(1,Math.hypot(dx,dy));
+      var ux=dx/dl, uy=dy/dl, gap=2+2*f.sc;
+      var m0x=mx-ux*gap, m0y=my-uy*gap, m1x=mx+ux*gap, m1y=my+uy*gap;
+      X.strokeStyle='rgba(248,242,225,'+(0.4+0.6*sg.expo)+')';
+      X.lineWidth=Math.max(2,3.2*f.sc*(1-0.35*i/f.N));
+      X.beginPath(); X.moveTo(p0.x,p0.y); X.lineTo(m0x,m0y); X.stroke();
+      X.beginPath(); X.moveTo(m1x,m1y); X.lineTo(p1.x,p1.y); X.stroke();
+      X.strokeStyle='rgba(210,198,170,'+(0.6*sg.expo)+')'; X.lineWidth=1;
+      X.beginPath(); X.moveTo(m0x-uy*2.4,m0y+ux*2.4); X.lineTo(m0x+ux*1.2,m0y+uy*1.2); X.lineTo(m0x+uy*2.4,m0y-ux*2.4); X.moveTo(m1x-uy*2.4,m1y+ux*2.4); X.lineTo(m1x-ux*1.2,m1y-uy*1.2); X.lineTo(m1x+uy*2.4,m1y-ux*2.4); X.stroke();
+      X.fillStyle='rgba(200,60,40,'+(0.75+0.2*Math.sin(G.t*3)*0.3)+')';
+      X.beginPath(); X.arc(mx,my,3.2,0,TAU); X.fill();
+    } else {
+      X.strokeStyle='rgba(248,242,225,'+(0.35+0.65*sg.expo)+')';
+      X.lineWidth=Math.max(2,3.2*f.sc*(1-0.35*i/f.N));
+      X.beginPath(); X.moveTo(p0.x,p0.y); X.lineTo(p1.x,p1.y); X.stroke();
+    }
+    if(sg.expo>0.55){
+      X.strokeStyle='rgba(210,198,170,'+(0.5*sg.expo)+')'; X.lineWidth=1;
+      X.beginPath(); X.moveTo(mx,my-3.4); X.lineTo(mx-2.4,my); X.lineTo(mx,my+3.4); X.lineTo(mx+2.4,my); X.closePath(); X.stroke();
+    }
+  }
+  for(var ri=0;ri<f.ribs.length;ri++){
+    var rb=f.ribs[ri];
+    if(rb.expo<0.05||drawnSides.indexOf(rb.side)<0) continue;
+    var hwv=hwRaw(f,f.segs[rb.col].x), anchorX=f.segs[rb.col].x;
+    var pyi=rb.side===0?-1:1, seg=pts[Math.min(rb.col,f.N)], sy=seg?seg.y:0;
+    var len=(hwv+f.spreadCur*0.8)*0.78*(rb.broken?0.45:1), tipX=anchorX+4*f.sc;
+    X.strokeStyle='rgba(244,238,220,'+(0.3+0.6*rb.expo)+')'; X.lineWidth=1.8;
+    X.beginPath(); X.moveTo(anchorX,sy+pyi*2.5);
+    X.quadraticCurveTo(anchorX+3*f.sc,sy+pyi*len*0.6,tipX,sy+pyi*len); X.stroke();
+    if(rb.broken){ X.fillStyle='rgba(200,60,40,0.85)'; X.beginPath(); X.arc(tipX,sy+pyi*len,2.2,0,TAU); X.fill(); }
+  }
+  var headExpo=(f.segs[0].expo+f.segs[1].expo)/2;
+  if(headExpo>0.3){
+    var hp=pts[0];
+    X.fillStyle='rgba(248,242,225,'+(0.3+0.6*headExpo)+')';
+    X.beginPath(); X.ellipse(hp.x-4*f.sc,hp.y,12*f.sc,8.5*f.sc,0,0,TAU); X.fill();
+    X.fillStyle='rgba(30,22,14,'+(0.6*headExpo)+')';
+    X.beginPath(); X.arc(hp.x-6*f.sc,hp.y-3*f.sc,2.4,0,TAU); X.fill();
+    X.strokeStyle='rgba(248,242,225,'+(0.3+0.5*headExpo)+')'; X.lineWidth=1.4;
+    X.beginPath(); X.moveTo(hp.x+4*f.sc,hp.y-6*f.sc); X.lineTo(hp.x-11*f.sc,hp.y-8.5*f.sc);
+    X.moveTo(hp.x+4*f.sc,hp.y+6*f.sc); X.lineTo(hp.x-11*f.sc,hp.y+8.5*f.sc); X.stroke();
+  }
+  var tailExpo=(f.segs[f.N-1].expo+f.segs[f.N-2].expo)/2;
+  if(tailExpo>0.3){
+    var tp=pts[f.N];
+    X.strokeStyle='rgba(244,238,220,'+(0.3+0.6*tailExpo)+')'; X.lineWidth=1.5;
+    for(var k=-2;k<=2;k++){ X.beginPath(); X.moveTo(tp.x,tp.y); X.lineTo(tp.x+11*f.sc,tp.y+k*5.5*f.sc); X.stroke(); }
+  }
+}
+function rrectPath(x,y,w,h,r){
+  if(h<1){ X.rect(x,y,w,h); return; }
+  r=Math.min(r,w/2,h/2);
+  X.moveTo(x+r,y);
+  X.lineTo(x+w-r,y); X.quadraticCurveTo(x+w,y,x+w,y+r);
+  X.lineTo(x+w,y+h-r); X.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  X.lineTo(x+r,y+h); X.quadraticCurveTo(x,y+h,x,y+h-r);
+  X.lineTo(x,y+r); X.quadraticCurveTo(x,y,x+r,y);
+  X.closePath();
+}
+var DIMPC={};
+function drawChopsticks(L){
+  var tip=G.tip;
+  if(tip.x<-50||tip.y<-50) return;
+  var sink=G.P*7+G.pressKick*3.5, tx=tip.x, ty=tip.y+sink*0.7;
+  if(G.openDrag){ tx+=rnd(-1.8,1.8); ty+=rnd(-1.4,1.4); } // 開き中、箸は抵抗に震える
+  var onPlate=Math.hypot(tip.x-L.cx,(tip.y-L.cy)/0.6)<L.plateR;
+  if((G.P>0.05||G.pressKick>0.1)&&onPlate){
+    var kb=Math.round(Math.min(1,G.P)*10);
+    if(!DIMPC[kb]){
+      var dg=X.createRadialGradient(0,0,2,0,0,20+kb*1.2);
+      dg.addColorStop(0,'rgba(60,40,20,'+(0.025*kb)+')'); dg.addColorStop(1,'rgba(60,40,20,0)');
+      DIMPC[kb]=dg; }
+    X.save(); X.translate(tx,ty); X.fillStyle=DIMPC[kb];
+    X.beginPath(); X.ellipse(0,0,(20+kb*1.2),(13+kb*0.8)*0.7,0,0,TAU); X.fill(); X.restore(); }
+  if(G.P>0.05){
+    var zoneCol=(G.P<0.36)?'rgba(255,255,255,0.5)':(G.P<=0.78?'rgba(255,220,140,0.7)':'rgba(255,90,60,0.85)');
+    X.strokeStyle=zoneCol; X.lineWidth=2;
+    X.beginPath(); X.arc(tx,ty,15,-Math.PI/2,-Math.PI/2+TAU*G.P); X.stroke();
+    if(G.P>0.78){
+      X.fillStyle='rgba(255,90,60,'+(0.5+0.3*Math.sin(G.t*14))+')';
+      X.font='700 12px '+SANS; X.textAlign='center'; X.fillText('み…',tx+22,ty-14); } }
+  var bx=tx+120, by=ty+150, bend=3+6*G.P+(G.openDrag?4:0);
+  X.lineCap='round';
+  X.strokeStyle=(G.P>0.78)?'#c46a3a':'#b98c4a'; X.lineWidth=5.5;
+  X.beginPath(); X.moveTo(bx,by); X.quadraticCurveTo((bx+tx)/2+6,(by+ty)/2+bend,tx+1,ty+1); X.stroke();
+  X.strokeStyle='#a3762f';
+  X.beginPath(); X.moveTo(bx+16,by+14); X.quadraticCurveTo((bx+16+tx)/2+8,(by+14+ty)/2+bend+2,tx+4,ty+2.5); X.stroke();
+  X.fillStyle='#8a6428'; X.beginPath(); X.arc(bx+8,by+7,4.5,0,TAU); X.fill(); }
+function drawPlayHUD(){
+  var S=STAGES[G.stage], L=layout();
+  X.font='700 16px '+SERIF; X.textAlign='left'; X.textBaseline='middle'; X.fillStyle='#3a2c18'; X.fillText(S.full,12,L.shelfH+22);
+  X.font='600 10px '+SANS; X.fillStyle='rgba(90,70,40,0.85)'; X.fillText(G.hint,12,L.shelfH+40);
+  var t=Math.max(0,G.timer), warn=t<10;
+  X.textAlign='right';
+  X.font='700 '+(warn?22:19)+'px '+SERIF;
+  X.fillStyle='#3a2c18';
+  if(warn){ var pulse=(Math.sin(G.t*8)*0.5+0.5); X.fillStyle='rgba(190,50,40,'+(0.6+0.4*pulse)+')'; }
+  X.fillText('のこり '+Math.ceil(t)+'秒',W-14,L.shelfH+22);
+  var f=G.fish;
+  if(f){
+    var pp=pilePos(), pulled=f.pulledCount, rem=0;
+    for(var i=0;i<f.smallbones.length;i++) if(f.smallbones[i].state==='in') rem++;
+    X.font='600 9px '+SANS; X.textAlign='center'; X.fillStyle='rgba(90,70,40,0.75)'; X.fillText('小骨置き場',pp.x,pp.y-16);
+    X.fillText('抜き'+pulled+'本 / のこり'+rem+'',pp.x,pp.y+14);
+    X.strokeStyle='rgba(60,45,28,0.8)'; X.lineWidth=1.4;
+    for(var k=0;k<Math.min(pulled,12);k++){
+      var ax=pp.x-18+((k*29)%40), ay=pp.y+((k*13)%8)-4;
+      X.beginPath(); X.moveTo(ax,ay+3); X.lineTo(ax+7,ay-3); X.stroke(); }
+    if(f.swallowed>0){ X.font='700 10px '+SANS; X.fillStyle='rgba(170,50,40,0.9)'; X.fillText('チクッ×'+f.swallowed,pp.x,pp.y+26); }
+    if(G.combo>=3){
+      X.font='700 12px '+SANS; X.textAlign='center';
+      X.fillStyle='rgba(160,110,40,'+(0.5+0.3*Math.sin(G.t*10))+')';
+      X.fillText('連続'+G.combo+'枚',G.tip.x+30,G.tip.y-30); } }
+  if(f&&f.S.rotate) button('rotate','皿を回す (R)',W-118,H-52,106,34,doRotate,'#4a3a20');
+  if(f&&f.S.flip) button('flip','裏返す (F)',W-118,H-52,106,34,doFlip,'#4a3a20');
+  if(f&&f.S.open&&f.split<1){
+    // 『開く』は指で行う行為そのもの(OキーはPCの同等補助)
+    X.font='700 12px '+SANS; X.textAlign='center';
+    X.fillStyle=G._openReady?'rgba(122,60,20,0.95)':'rgba(96,84,64,0.85)';
+    X.fillText(G._openReady?'中骨が覗いた — 押さえて、頭か尾へ引き開けろ':'中央の身を、もう少し剥がす(開くのはまだ早い)',W/2,H-34); }
+  if(f&&f.S.slip&&G.slipX>10){
+    X.font='700 11px '+SANS; X.textAlign='center'; X.fillStyle='rgba(150,80,30,0.85)'; X.fillText('煮汁に流されている…',G.tip.x,G.tip.y+34); } }
+function drawCurator(){
+  var c=G.curator; if(!c) return;
+  var a=clamp(c.t*6,0,1)*clamp((c.life-c.t)*3,0,1);
+  if(a<=0.01) return;
+  X.save(); X.globalAlpha=a;
+  X.fillStyle='rgba(16,12,8,0.85)'; X.fillRect(0,H*0.40,W,54);
+  X.strokeStyle='rgba(190,150,70,0.8)'; X.lineWidth=1;
+  X.beginPath();
+  X.moveTo(W*0.06,H*0.40); X.lineTo(W*0.94,H*0.40);
+  X.moveTo(W*0.06,H*0.40+54); X.lineTo(W*0.94,H*0.40+54);
+  X.stroke();
+  X.textAlign='center'; X.textBaseline='middle';
+  X.font='600 14px '+SERIF; X.fillStyle='#efe2c4'; X.fillText(c.text,W/2,H*0.40+20);
+  X.font='600 9px '+SANS; X.fillStyle='rgba(190,160,100,0.9)'; X.fillText('— 標本室 館長',W/2,H*0.40+40);
+  X.restore(); X.textBaseline='alphabetic'; }
+function box(x,y,w,h,r,fillCol,strokeCol,lw){
+  X.fillStyle=fillCol; X.beginPath(); rrectPath(x,y,w,h,r); X.fill();
+  if(strokeCol){ X.strokeStyle=strokeCol; X.lineWidth=lw||1.4; X.beginPath(); rrectPath(x,y,w,h,r); X.stroke(); }
+}
+function button(id,label,x,y,w,h,act,bg){
+  var hov=(G.ptr.x>=x&&G.ptr.x<=x+w&&G.ptr.y>=y&&G.ptr.y<=y+h);
+  box(x,y,w,h,7,bg||'#2a2320',hov?'rgba(220,190,120,0.9)':'rgba(190,150,70,0.55)',1.4);
+  X.font='700 13px '+SANS; X.textAlign='center'; X.textBaseline='middle';
+  X.fillStyle='#f2e8d5'; X.fillText(label,x+w/2,y+h/2+1);
+  G.buttons.push({id:id,x:x,y:y,w:w,h:h,act:act});
+}
+function primaryButton(id,label,x,y,w,h,act,bg){
+  button(id||'primary',label,x,y,w,h,act,bg||'#7d2a22');
+  G.primary=act;
+}
+function drawSpecimen(cx,cy,w,h,S,rec,mini,float){
+  X.save();
+  if(!float) box(cx-w/2,cy-h/2,w,h,3,'#12100c','rgba(184,150,63,0.9)',mini?1:2);
+  var N=S.N, L=w*0.86, x0=cx-L/2, segW=L/N, bone=mini?'rgba(240,234,215,':'rgba(248,242,225,', lw=mini?1.2:2.2;
+  var a=0, yc=0, pts=[];
+  for(var i=0;i<=N;i++){
+    if(i>0){
+      var bk=null;
+      for(var bI=0;bI<rec.spineKinks.length;bI++) if(rec.spineKinks[bI].idx===i-1) bk=rec.spineKinks[bI];
+      if(bk) a=clamp(a+bk.kink,-1.1,1.1);
+      yc+=Math.tan(a)*segW; }
+    pts.push({x:x0+segW*i,y:cy+yc}); }
+  for(var i2=0;i2<N;i2++){
+    X.strokeStyle=bone+'0.95)'; X.lineWidth=lw*(1-0.3*i2/N); X.lineCap='round';
+    X.beginPath(); X.moveTo(pts[i2].x,pts[i2].y); X.lineTo(pts[i2+1].x,pts[i2+1].y); X.stroke();
+    if(!mini){
+      X.strokeStyle='rgba(190,180,155,0.5)'; X.lineWidth=0.8;
+      var mx=(pts[i2].x+pts[i2+1].x)/2,my=(pts[i2].y+pts[i2+1].y)/2;
+      X.beginPath(); X.moveTo(mx,my-2.6); X.lineTo(mx-1.8,my); X.lineTo(mx,my+2.6); X.lineTo(mx+1.8,my);
+      X.closePath(); X.stroke(); }
+    var brokenHere=false;
+    for(var b2=0;b2<rec.spine.length;b2++) if(rec.spine[b2].idx===i2) brokenHere=true;
+    if(brokenHere){ X.fillStyle='#c0392b'; X.beginPath(); X.arc((pts[i2].x+pts[i2+1].x)/2,(pts[i2].y+pts[i2+1].y)/2,mini?1.6:3.4,0,TAU); X.fill(); }
+  }
+  var no=[0,0];
+  for(var c=2;c<=N-3;c+=2){
+    var hlv=fishProfile(c/(N-1))*(h*0.42), ax=x0+segW*(c+0.5), pyn=pts[Math.min(c,N)];
+    for(var s=0;s<2;s++){
+      no[s]++;
+      var py=pyn.y+(s===0?-1:1)*1.5, dir=(s===0?-1:1), broken=false, matchNo=no[s];
+      for(var rb=0;rb<rec.ribs.length;rb++) if(rec.ribs[rb].side===s&&rec.ribs[rb].no===matchNo){ broken=true; break; }
+      var len=broken?hlv*0.4:hlv;
+      X.strokeStyle=bone+'0.9)'; X.lineWidth=mini?1:1.6;
+      X.beginPath(); X.moveTo(ax,py); X.quadraticCurveTo(ax+segW*0.3,py+dir*len*0.55,ax+segW*0.2,py+dir*len); X.stroke();
+      if(broken){ X.fillStyle='#c0392b'; X.beginPath(); X.arc(ax+segW*0.2,py+dir*len,mini?1.2:2.4,0,TAU); X.fill(); } } }
+  X.fillStyle=bone+'0.95)'; X.beginPath(); X.ellipse(x0-segW*0.4,cy,mini?segW*0.9:segW*0.95,h*0.14,0,0,TAU); X.fill();
+  if(!mini){ X.fillStyle='rgba(18,16,12,0.95)'; X.beginPath(); X.arc(x0-segW*0.55,cy-h*0.045,1.8,0,TAU); X.fill(); }
+  X.strokeStyle=bone+'0.9)'; X.lineWidth=mini?0.9:1.4;
+  for(var k=-2;k<=2;k++){ X.beginPath(); X.moveTo(x0+L,cy); X.lineTo(x0+L+(mini?w*0.05:w*0.035),cy+k*h*0.09); X.stroke(); }
+  if(rec.leftover>0){
+    X.fillStyle='rgba(140,90,45,'+Math.min(0.75,0.3+rec.leftover)+')';
+    var nb=Math.max(1,Math.round(rec.leftover*N*0.7));
+    for(var q=0;q<nb;q++){
+      var qi=N-1-((q*3)%(N-2)), qx=x0+segW*qi, qy=cy+(q%2===0?-1:1)*h*0.2;
+      X.beginPath(); X.ellipse(qx,qy,segW*0.7,h*0.13,0,0,TAU); X.fill(); }
+    X.font='600 '+(mini?7:11)+'px '+SANS; X.textAlign='center';
+    X.fillStyle='rgba(220,200,160,0.9)'; X.fillText('食べ残し',cx,cy+h/2-6); }
+  X.restore();
+}
+function drawTitle(){
+  var cx=W/2;
+  drawBg();
+  X.textAlign='center';
+  X.font='600 12px '+SANS; X.fillStyle='rgba(130,100,50,0.9)'; X.fillText('本 日 の 朝 食 標 本 室',cx,56);
+  X.font='700 '+Math.min(30,W/13)+'px '+SERIF; X.fillStyle='#2e2113'; X.fillText('焼き魚の骨を、',cx,98); X.fillText('一本も折らずに食べろ。',cx,138);
+  var bw=Math.min(W*0.62,280), bh=bw*0.34;
+  drawSpecimen(cx,200,bw,bh,STAGES[0],{spine:[],ribs:[],spineKinks:[],leftover:0},false);
+  X.font='600 11px '+SANS; X.fillStyle='rgba(110,85,45,0.9)';
+  X.fillText('— 標本室より: 完全な骨格だけが、標本になれる —',cx,200+bh/2+22);
+  if(G.save&&G.save.bestAvg>0){
+    X.font='600 10px '+SANS; X.fillStyle='rgba(140,100,50,0.9)';
+    X.fillText('収蔵ベスト 完全度'+G.save.bestAvg+'% ／ 最少折損'+(G.save.leastBreaks===99?'—':G.save.leastBreaks+'本'),cx,200+bh/2+40); }
+  if(Math.random()<0.07) steam({x:cx+rnd(-60,60),y:196});
+  var ly=H*0.5;
+  X.font='600 13px '+SANS; X.fillStyle='rgba(70,55,30,0.95)';
+  X.fillText('押したままなぞって、皮と身を骨から剥がす。',cx,ly); X.fillText('強く押しすぎると、中骨が『コキッ』と折れる。',cx,ly+24);
+  X.fillText('6膳の焼き魚。開きも裏返しもこなして、標本を完成させろ。',cx,ly+48);
+  X.fillStyle='rgba(140,50,40,0.9)'; X.font='600 12px '+SANS; X.fillText('小骨はつまんで抜く。最終膳には『鯛の鯛』が眠る。',cx,ly+74);
+  primaryButton('start','箸を握る',cx-80,H-96,160,46,function(){ startRun(); });
+  X.font='600 10px '+SANS; X.fillStyle='rgba(120,95,55,0.7)'; X.fillText('音が出ます / スマホは押しながらなぞる / 開きは指で引き開ける(PCはO)',cx,H-34); }
+function drawIntroBanner(){
+  var S=STAGES[G.stage], bw=Math.min(W-30,380), a=clamp(G.bannerT*3,0,1);
+  X.fillStyle='rgba(20,15,10,'+(0.45*a)+')'; X.fillRect(0,0,W,H);
+  X.save(); X.globalAlpha=a;
+  X.fillStyle='rgba(23,19,15,0.96)'; X.fillRect(W/2-bw/2,H*0.32,bw,132);
+  X.strokeStyle='rgba(184,150,63,0.9)'; X.lineWidth=2; X.strokeRect(W/2-bw/2,H*0.32,bw,132);
+  X.strokeStyle='rgba(184,150,63,0.35)'; X.strokeRect(W/2-bw/2+5,H*0.32+5,bw-10,122);
+  X.textAlign='center';
+  X.font='700 26px '+SERIF; X.fillStyle='#f0e2c0'; X.fillText(S.full,W/2,H*0.32+42);
+  X.font='600 12.5px '+SANS; X.fillStyle='rgba(230,215,180,0.9)'; wrapText(S.tip,W/2,H*0.32+72,bw-44,18);
+  X.font='600 11px '+SANS; X.fillStyle='rgba(190,160,100,0.85)'; X.fillText('タップで箸を持つ',W/2,H*0.32+114);
+  X.restore(); }
+function wrapText(text,x,y,maxw,lh){
+  var chars=String(text).split(''), line='', lines=[];
+  for(var i=0;i<chars.length;i++){
+    if(X.measureText(line+chars[i]).width>maxw){ lines.push(line); line=chars[i]; }
+    else line+=chars[i]; }
+  if(line) lines.push(line);
+  for(var j=0;j<lines.length;j++) X.fillText(lines[j],x,y+j*lh); }
+function drawInter(){
+  var rec=G.run.records[G.run.records.length-1], bw=Math.min(W-30,380);
+  X.fillStyle='rgba(15,12,8,0.55)'; X.fillRect(0,0,W,H);
+  X.fillStyle='rgba(23,19,15,0.97)'; X.fillRect(W/2-bw/2,H*0.3,bw,168);
+  X.strokeStyle='rgba(184,150,63,0.9)'; X.lineWidth=2; X.strokeRect(W/2-bw/2,H*0.3,bw,168);
+  X.textAlign='center';
+  X.font='700 22px '+SERIF; X.fillStyle='#f0e2c0'; X.fillText('完食。',W/2,H*0.3+40);
+  X.font='600 14px '+SERIF; X.fillStyle='rgba(235,220,185,0.95)'; wrapText(AFTER_LINES[Math.min(G.stage,AFTER_LINES.length-1)],W/2,H*0.3+68,bw-48,20);
+  X.font='600 12px '+SANS; X.fillStyle='rgba(200,175,120,0.9)';
+  var bn=rec.spine.length+rec.ribs.length;
+  var skinTxt=((rec.skinClean+rec.skinTorn)>0)?' ／ 皮 剥ぎ'+rec.skinClean+'・裂き'+rec.skinTorn:'';
+  X.fillText('所用 '+Math.round(rec.timeUsed)+'秒 ／ 折損 '+(bn===0?'なし。完璧。':bn+'本')+' ／ 骨格完全度 '+rec.score+'%'+skinTxt,W/2,H*0.3+124);
+  primaryButton('next','次の膳へ',W/2-70,H*0.3+132,140,40,function(){ startStage(G.stage+1); }); }
+function drawFail(){
+  var f=G.fish, S=f.S;
+  var pct=f.leftoverPct||Math.round(100*f.aliveCount/f.totalCells);
+  var bw=Math.min(W-30,380), px=W/2-bw/2, py=H*0.18, ph=268;
+  X.fillStyle='rgba(15,12,8,0.6)'; X.fillRect(0,0,W,H);
+  X.fillStyle='rgba(23,19,15,0.97)'; X.fillRect(px,py,bw,ph);
+  X.strokeStyle='rgba(160,60,45,0.9)'; X.lineWidth=2; X.strokeRect(px,py,bw,ph);
+  X.textAlign='center';
+  X.font='700 23px '+SERIF; X.fillStyle='#e8b8a8'; X.fillText('食べ残し '+pct+'%',W/2,py+34);
+  X.font='600 13px '+SERIF; X.fillStyle='rgba(235,220,185,0.95)';
+  X.fillText((pct>15)?'「身は、逃げた。」':'「あと一歩だった。」',W/2,py+60);
+  drawSpecimen(W/2,py+110,bw*0.52,bw*0.52*0.34,S,failRec(f),false);
+  X.font='600 11px '+SANS; X.fillStyle='rgba(210,180,130,0.95)';
+  var first='折損なし(だが遅い)';
+  if(f.spineBreaks.length) first='最初の折損:中骨第'+(f.spineBreaks[0].idx+1)+'椎骨('+f.spineBreaks[0].reason+')';
+  else if(f.ribBreaks.length) first='最初の折損:'+f.ribBreaks[0].label+'第'+f.ribBreaks[0].no+'肋骨';
+  X.fillText(first,W/2,py+162); X.fillText('小骨嚥下 '+f.swallowed+'本 ／ 抜去 '+f.pulledCount+'本',W/2,py+180);
+  X.fillStyle='rgba(170,140,90,0.85)'; X.fillText((pct>15)?'焦らず、押し加減を思い出せ。':'標本まで、もう一枚。',W/2,py+198);
+  primaryButton('retry','もう一度、この膳から',px+20,py+ph-84,bw-40,38,function(){ retryStage(); });
+  button('failcopy','この事故をコピー',px+20,py+ph-38,bw*0.55-20,32,doFailShare,'#3a2f20');
+  button('quit','朝食を中止',px+bw*0.55+8,py+ph-38,bw*0.45-28,32,function(){ G.scene='title'; }); }
+function drawClearingAnim(){
+  var L=layout(), t=clamp(G.clearT/1.4,0,1);
+  var rec=G.run.records[G.run.records.length-1];
+  var slotW=Math.min(64,(W-80)/6), shown=G.run.records.length-1;
+  var x0=W/2-((Math.min(6,Math.max(shown,1)))*slotW)/2;
+  var tx=x0+shown*slotW+slotW/2, ty=L.shelfH/2, e=ease(t);
+  var wf=lerp(L.plateR*1.55,slotW*0.9,e);
+  X.save(); X.globalAlpha=1-t*0.15;
+  drawSpecimen(lerp(L.cx,tx,e),lerp(L.cy,ty,e),wf,wf*0.42,STAGES[G.stage],rec,false,true);
+  X.restore();
+}
+function drawTaitai(){
+  X.fillStyle='#0d0b09'; X.fillRect(0,0,W,H);
+  var cx=W/2, cy=H*0.44, rec=G.run.records[5], S=STAGES[5], t=G.taitaiT;
+  var a=clamp(t*1.5,0,1);
+  X.save(); X.globalAlpha=a;
+  var rise=(G.run.taitaiFound&&t>1.7)?Math.sin(clamp((t-1.7)/0.9,0,1)*Math.PI)*10:0;
+  var bowA=(G.run.taitaiFound&&t>1.9&&t<2.8)?Math.sin(clamp((t-1.9)/0.9,0,1)*Math.PI)*0.09:0;
+  X.translate(cx,cy-rise); X.rotate(bowA);
+  drawSpecimen(0,0,Math.min(W*0.7,320),Math.min(W*0.7,320)*0.36,S,rec,false);
+  X.restore();
+  if(G.run.taitaiFound){
+    if(t>0.6&&t<1.5){
+      var e=clamp((t-0.6)/0.9,0,1);
+      drawTaiTai(lerp(cx-60,cx-Math.min(W*0.7,320)*0.43,ease(e)),lerp(cy+H*0.16,cy,ease(e))-10,9,'#f5edc9'); }
+    if(t>=1.5) drawTaiTai(cx-Math.min(W*0.7,320)*0.43+4,cy-6,8,'rgba(245,237,201,'+clamp((t-1.5)*4,0,1)+')');
+    if(t>1.5&&t<1.9&&Math.random()<0.4) burst({x:cx-Math.min(W*0.7,320)*0.43,y:cy-8},2,'#fff0b8');
+    if(t>1.85&&t<1.95&&!G.taitaiBell){ G.taitaiBell=true; sBoneHit(); }
+    X.textAlign='center';
+    X.font='700 20px '+SERIF; X.fillStyle='rgba(240,225,190,'+a+')';
+    if(t>1.9) X.fillText('鯛の鯛、標本に収まる。',cx,cy+H*0.22);
+    if(t>2.6){ X.font='700 16px '+SERIF; X.fillStyle='rgba(240,225,190,'+clamp((t-2.6)*2,0,1)+')'; X.fillText('一礼。',cx,cy-H*0.24); }
+    if(t>2.9){
+      var fa=clamp((t-2.9)/0.7,0,1), fw=Math.min(W*0.7,320)*0.62*fa, fh=fw*0.5;
+      X.strokeStyle='rgba(184,150,63,'+(0.4+0.6*fa)+')'; X.lineWidth=3; X.strokeRect(cx-fw,cy-fh,fw*2,fh*2); }
+  } else {
+    X.textAlign='center';
+    X.font='700 20px '+SERIF; X.fillStyle='rgba(230,215,180,'+a+')';
+    X.fillText(G.run.taitaiSwallowed?'鯛の鯛は、胃の中にある。':'鯛の鯛は、見つからなかった。',cx,cy+H*0.22); }
+  X.font='600 10px '+SANS; X.textAlign='center'; X.fillStyle='rgba(160,140,100,0.7)'; X.fillText('タップで進む',cx,H-24); }
+function drawResult(){
+  X.fillStyle='#0d0b09'; X.fillRect(0,0,W,H);
+  var vg=X.createRadialGradient(W/2,H*0.4,10,W/2,H*0.4,Math.max(W,H)*0.7);
+  vg.addColorStop(0,'rgba(80,62,30,0.35)'); vg.addColorStop(1,'rgba(0,0,0,0)');
+  X.fillStyle=vg; X.fillRect(0,0,W,H);
+  var sc=Math.min(1,H/860,W/430);
+  X.save();
+  X.translate(W/2,0); X.scale(sc,sc); X.translate(-W/2,0);
+  var cw=W;
+  X.textAlign='center';
+  X.font='700 23px '+SERIF; X.fillStyle='#c9a558'; X.fillText('骨格標本 完成披露',cw/2,28);
+  X.font='600 11px '+SANS; X.fillStyle='rgba(200,180,130,0.85)'; var recs=G.run.records, tot=0;
+  for(var i=0;i<recs.length;i++) tot+=recs[i].timeUsed;
+  X.fillText('標本番号 第119号 ／ 総所用 '+fmtTime(tot)+' ／ リトライ'+G.run.retries+'回',cw/2,48);
+  var bw=Math.min(cw*0.24,100), bh=bw*0.42, gx=cw/2-(bw*3+16)/2;
+  for(var r=0;r<recs.length;r++){
+    var colI=r%3, rowI=(r/3)|0, bx=gx+colI*(bw+8), by=62+rowI*(bh+30);
+    drawSpecimen(bx+bw/2,by+bh/2,bw,bh,STAGES[recs[r].si],recs[r],true);
+    X.font='600 10px '+SANS; X.textAlign='center'; X.fillStyle='rgba(210,190,140,0.9)';
+    X.fillText('第'+(r+1)+'膳 '+recs[r].name+' '+recs[r].score+'%',bx+bw/2,by+bh+11); }  var listY=62+2*(bh+30)+4, cardW=Math.min(cw-24,380), avg=avgScore();
+  var spTot=0, rbTot=0, swTot=0, plTot=0, skC=0, skT=0;
+  for(var j=0;j<recs.length;j++){ spTot+=recs[j].spine.length; rbTot+=recs[j].ribs.length; swTot+=recs[j].swallowed; plTot+=recs[j].pulled; skC+=recs[j].skinClean||0; skT+=recs[j].skinTorn||0; }
+  var details=[];
+  if(spTot+rbTot===0) details.push('折損なし。全骨、無事。');
+  for(var j2=0;j2<recs.length&&details.length<4;j2++){
+    for(var s2=0;s2<recs[j2].spine.length&&details.length<4;s2++)
+      details.push('第'+(j2+1)+'膳 中骨第'+(recs[j2].spine[s2].idx+1)+'椎骨 — '+recs[j2].spine[s2].reason+'で『コキッ』');
+    for(var s3=0;s3<recs[j2].ribs.length&&details.length<4;s3++)
+      details.push('第'+(j2+1)+'膳 '+recs[j2].ribs[s3].label+'第'+recs[j2].ribs[s3].no+'肋骨 — 強圧で撓り');
+  }
+  if(spTot+rbTot>4) details.push('…ほか'+(spTot+rbTot-4)+'件の折損');
+  if(details.length<5&&skC+skT>0) details.push('皮 — きれいに剥ぎ'+skC+'列／裂き'+skT+'列');
+  var taiTxt=G.run.taitaiFound?'鯛の鯛: 発見':(G.run.taitaiSwallowed?'鯛の鯛: 嚥下(飲み込んだ)':'鯛の鯛: 未発見');
+  var cardH=66+details.length*16;
+  box(cw/2-cardW/2,listY,cardW,cardH,5,'rgba(245,240,228,0.96)','rgba(184,150,63,0.7)',1.4);
+  X.textAlign='center';
+  X.font='700 19px '+SERIF; X.fillStyle='#2a2115'; X.fillText('骨格完全度 '+avg+'%',cw/2,listY+22);
+  X.font='600 11.5px '+SANS; X.fillStyle='rgba(70,55,30,0.95)'; X.fillText(taiTxt+' ／ 小骨: 抜去'+plTot+'本・嚥下'+swTot+'本',cw/2,listY+40);
+  X.font='600 11px '+SERIF; X.textAlign='left'; X.fillStyle='rgba(60,45,25,0.95)'; X.fillText('─ 折損明細 ─',cw/2-cardW/2+14,listY+58);
+  X.textAlign='center';
+  for(var d=0;d<details.length;d++){
+    X.fillStyle=(details[d].indexOf('折損なし')>=0)?'rgba(60,110,60,0.95)':'rgba(150,40,30,0.95)';
+    X.fillText(details[d],cw/2,listY+74+d*16);
+  }
+  var ry=listY+cardH+34;
+  X.save();
+  X.translate(cw/2,ry); X.rotate(-0.05);
+  box(-92,-24,184,48,6,'#a33326','rgba(255,235,215,0.55)',1.2);
+  X.font='700 21px '+SERIF; X.fillStyle='#fff4e6'; X.textAlign='center'; X.textBaseline='middle';
+  X.fillText('『 '+rankOf()+' 』',0,1);
+  X.restore(); X.textBaseline='alphabetic';
+  // 称号図鑑(過去取得は名前で、未獲得だけ？？？+条件)
+  var ty=ry+46, set=earnedTitles();
+  X.font='600 11px '+SANS; X.textAlign='center'; X.fillStyle='rgba(200,170,110,0.9)'; X.fillText('─ 称号図鑑 ─',cw/2,ty);
+  X.textAlign='left';
+  for(var tl=0;tl<TITLES.length;tl++){
+    var T=TITLES[tl], has=!!set[T.id];
+    X.font=(has?'700 ':'600 ')+'11px '+SANS;
+    X.fillStyle=has?'#e2b96a':'rgba(120,105,80,0.75)';
+    X.fillText(has?('◆ '+T.name):('◇ ？？？（'+T.cond+'）'),cw/2-cardW/2+18,ty+16+tl*15); }
+  // 前回ベスト(更新前の値を退避してある)と、次の狙い
+  var pvA=(G.prevBestAvg==null&&G.save)?G.save.bestAvg:(G.prevBestAvg||0);
+  var pvL=(G.prevLeastBrk==null&&G.save)?G.save.leastBreaks:G.prevLeastBrk;
+  if(pvL==null) pvL=99;
+  var lb=(pvL===99)?'—':pvL+'本';
+  X.font='600 10.5px '+SANS; X.textAlign='center'; X.fillStyle='rgba(180,160,115,0.95)';
+  X.fillText('前回ベスト 完全度'+pvA+'%／最少折損'+lb+' ／ '+(G.deltaAvg>0?('自己ベスト更新 +'+G.deltaAvg+'%'):('ベストまで '+(-G.deltaAvg)+'%')),cw/2,ty+16+TITLES.length*15+8);
+  X.fillStyle='rgba(220,190,120,0.95)'; X.font='600 12px '+SERIF; X.fillText(nextTarget(),cw/2,ty+16+TITLES.length*15+28);
+  X.restore();
+  var btnY=clamp(H-64,200,H-64), bw2=Math.min(150,(W-24)/2-8);
+  primaryButton('again','もう一度最初から',W/2-bw2-4,btnY,bw2,42,function(){ startRun(); });
+  button('share','共有文をコピー',W/2+4,btnY,bw2,42,doShare,'#3a2f20'); }
+function drawPlayfield(){
+  var L=layout();
+  drawPlate(L);
+  var f=G.fish;
+  if(!f||G.scene==='inter') return;
+  if(f.S.slip){ // 煮汁は皿ごと回る(さば)
+    X.save(); X.translate(L.cx,L.cy); X.rotate(f.angCur); drawBrothLocal(L); X.restore(); }
+  if(G.scene==='clearing'){ drawClearingAnim(); return; }
+  drawFishAll(L);
+  if(G.pull&&G.pull.kind==='s'){
+    var b=G.pull.b, bc=f.cells[b.cell], boff=offSide(f,bc.side);
+    var wp=l2w(f,b.x+Math.cos(b.ang)*(G.pull.t*10),b.y+boff+Math.sin(b.ang)*(G.pull.t*10));
+    var w0=l2w(f,b.x,b.y+boff);
+    X.strokeStyle='rgba(50,38,25,0.9)'; X.lineWidth=2;
+    X.beginPath(); X.moveTo(w0.x,w0.y); X.lineTo(wp.x,wp.y); X.stroke();
+    X.strokeStyle='rgba(255,250,235,0.85)'; X.lineWidth=2;
+    X.beginPath(); X.arc(w0.x,w0.y,12,-Math.PI/2,-Math.PI/2+TAU*G.pull.t); X.stroke(); }
+  if(G.pull&&G.pull.kind==='t'&&f.taitai){
+    var w1=l2w(f,f.taitai.x,f.taitai.y+offSide(f,0));
+    X.strokeStyle='rgba(255,235,170,0.9)'; X.lineWidth=2.4;
+    X.beginPath(); X.arc(w1.x,w1.y,15,-Math.PI/2,-Math.PI/2+TAU*G.pull.t); X.stroke();
+    drawTaiTai(w1.x,w1.y-G.pull.t*8,9,'#f5edc9'); }
+}
+function drawFx(tailOnly){
+  if(!tailOnly){
+    for(var i=0;i<G.parts.length;i++){
+      var p=G.parts[i], a=1-(p.t/p.life);
+      X.save();
+      X.globalAlpha=Math.max(0,a); X.translate(p.x,p.y); X.rotate(p.rot);
+      X.fillStyle=p.col; X.fillRect(-p.size/2,-p.size/2,p.size,p.size);
+      X.restore(); }
+    for(var i2=0;i2<G.steams.length;i2++){
+      var s=G.steams[i2], pr=s.t/s.life;
+      X.save();
+      X.globalAlpha=Math.max(0,(1-pr)*0.4);
+      X.strokeStyle='#fff'; X.lineWidth=2;
+      var sx=s.x+Math.sin(s.t*2+s.dr)*6+pr*s.dr*2, sy=s.y-pr*46;
+      X.beginPath(); X.moveTo(sx-3,sy+6); X.quadraticCurveTo(sx+3,sy,sx-2,sy-10); X.stroke();
+      X.restore(); }
+  }
+  X.textAlign='center';
+  for(var i3=0;i3<G.popups.length;i3++){
+    var p2=G.popups[i3], pr2=p2.t/p2.life;
+    var a2=pr2<0.15?pr2/0.15:(pr2>0.75?(1-pr2)/0.25:1);
+    var yy=p2.y-pr2*30;
+    X.save();
+    X.globalAlpha=Math.max(0,a2);
+    X.font='700 '+p2.size+'px '+SERIF;
+    X.lineWidth=4; X.strokeStyle='rgba(20,14,8,0.75)'; X.strokeText(p2.text,p2.x,yy);
+    X.fillStyle=p2.col; X.fillText(p2.text,p2.x,yy);
+    X.restore(); }
+  if(G.flashA>0.01){
+    X.fillStyle=G.flashCol; X.save();
+    X.globalAlpha=Math.min(0.5,G.flashA);
+    X.fillRect(0,0,W,H);
+    X.restore(); }
+}
+var statEl=null, evdEl=null, lastStat='';
+function statText(){
+  var sc=G.scene, f=G.fish, t=Math.floor(G.t);
+  if(sc==='title') return '収蔵記録:標本室 蔵目録'+((G.save&&G.save.titles)?G.save.titles.split(',').length:0)+'称号 '+t;
+  if(sc==='result') return '収蔵記録:完成披露 完全度'+avgScore()+'% '+t;
+  if(sc==='taitai') return '収蔵記録:鯛の鯛披露 '+t;
+  if(!f) return '収蔵記録:準備中 '+t;
+  if(sc==='fail') return '収蔵記録:'+f.S.name+' 食べ残し'+(f.leftoverPct||0)+'% '+t;
+  return '収蔵記録:'+f.S.full+' のこり'+Math.ceil(Math.max(0,G.timer))+'秒 身'+f.aliveCount+'/'+f.totalCells+' '+t;
+}
+function updateStat(){
+  try{
+    var s=statText();
+    if(s!==lastStat){ lastStat=s; if(statEl) statEl.textContent=s; }
+  }catch(e){}
+}
+function render(){
+  X.setTransform(DPR,0,0,DPR,0,0);
+  G.buttons.length=0;
+  G.primary=null;
+  updateStat();
+  if(G.shake>0.3) X.translate(rnd(-G.shake,G.shake)*0.6,rnd(-G.shake,G.shake)*0.6);
+  var sc=G.scene;
+  if(sc==='title'){ drawBg(); drawTitle(); drawFx(); return; }
+  if(sc==='result'){ drawResult(); drawFx(); return; }
+  if(sc==='taitai'){ drawTaitai(); drawFx(); return; }
+  drawBg();
+  drawShelf();
+  drawPlayfield();
+  drawFx(1);
+  if(sc==='play'||sc==='intro'||sc==='fail'){
+    drawPlayHUD();
+    if(sc==='play') drawChopsticks(layout());
+  }
+  drawCurator();
+  if(sc==='intro') drawIntroBanner();
+  if(sc==='inter') drawInter();
+  if(sc==='fail') drawFail();
+  drawFx(2);
+}
+// ==== 18. 自己点検(全レアパスをfile:読み込み時のみ1回自動実行・粒度の細かい証拠はplaytest-*.mjsが担当) ====
+var ST={pass:0,total:0,err:0,fps:0,fatal:null,ok:{},steps:[]};
+function stSnap(){ var f=G.fish;
+  return JSON.stringify({scene:G.scene,stage:G.stage,timer:Math.round((G.timer||0)*10)/10,alive:f?f.aliveCount:-1,
+    spine:f?f.spineBreaks.length:-1,ribs:f?f.ribBreaks.length:-1,swallowed:f?f.swallowed:-1,split:f?Math.round(f.split*100)/100:-1}); }
+function rec(n,ok){ ST.steps.push({step:n,ok:!!ok,state:stSnap()}); ST.total++; if(ok){ ST.pass++; ST.ok[n]=true; } }
+function stSim(n){ for(var i=0;i<n;i++) update(0.05); }
+function stSimP(n,P,lx,ly){ for(var i=0;i<n;i++){ G.P=P; stPtr(G.fish,lx,ly); update(0.05); } }
+function stPtr(f,lx,ly){ var w=l2w(f,lx,ly); G.ptr.x=w.x; G.ptr.y=w.y; G.tip.x=w.x; G.tip.y=w.y; return w; }
+function stUntil(c,cap){ var i=0; while(i<(cap||900)){ if(c()) return true; update(0.05); i++; } return !!c(); }
+function stGo(si){ startStage(si); G.bannerT=2.7; update(0.05); }
+function stAll(f){ for(var i=0;i<f.cells.length;i++) if(f.cells[i].alive) killCell(f,f.cells[i]); stUntil(function(){ return G.scene!=='play'; },80); }
+function stMid(f){ var lo=Math.floor(f.N*0.28), hi=Math.ceil(f.N*0.72);
+  for(var j=0;j<f.cells.length;j++){ var c=f.cells[j]; if(c.alive&&c.col>=lo&&c.col<hi&&c.row<f.R-2) killCell(f,c); } }
+function selfTestBody(){
+  var f,w,b,tc,ok,pp,half,flexed,c0,sy,sx,pts,k;
+  startRun(); G.bannerT=2.7; update(0.05); f=G.fish;
+  rec('開始:startRun→第1膳play',G.scene==='play'&&G.stage===0&&f.aliveCount>0);
+  var a0=f.aliveCount, t0=G.timer;
+  G.pressed=true; stSimP(8,0.15,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.4);
+  rec('弱圧:身はほぐれないが時は流れる',G.timer<t0&&f.aliveCount<=a0);
+  stSimP(50,0.55,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.4);
+  rec('適圧:aliveCount減少',f.aliveCount<a0);
+  stSimP(14,0.97,f.segs[8].x,-hwRaw(f,f.segs[8].x)*0.6);
+  pp=null; for(k=0;k<G.popups.length;k++) if(G.popups[k].text==='ピキッ') pp=G.popups[k];
+  rec('肋骨折損:ピキッ位置有限+部位ラベル',f.ribBreaks.length>0&&!!pp&&isFinite(pp.x)&&isFinite(pp.y)&&!!G.label&&G.label.indexOf('肋骨')>=0);
+  stPtr(f,f.segs[8].x,0);
+  ok=stUntil(function(){ return f.spineBreaks.length>0; },900);
+  rec('中骨折損:コキッ+館長テロップ',ok&&isFinite(f.spineBreaks[0].kink)&&G.run.curatorDone===true);
+  stSimP(34,0.7,f.segs[3].x,-hwRaw(f,f.segs[3].x)*0.95); stSimP(34,0.99,f.segs[5].x,-hwRaw(f,f.segs[5].x)*0.95);
+  render(); rec('皮損傷段階:剥ぎ(適圧)と裂き(強圧)を計上',f.skinClean>=1&&f.skinTorn>=1);
+  G.pressed=false; stAll(f); render();
+  rec('第1膳完食→記録(棚に赤い折損痕)',G.run.records.length===1&&G.run.records[0].spine.length>=1&&G.run.records[0].ribs.length>=1&&G.scene==='clearing');
+  stGo(1); f=G.fish; b=f.smallbones[0]; b.reveal=1; b.cellRef.dmg=0.6; G.pressed=true;
+  stPtr(f,b.x,b.y+offSide(f,b.cellRef.side)); tryPull({x:G.ptr.x,y:G.ptr.y});
+  ok=stUntil(function(){ return b.state==='pulled'; },40);
+  rec('小骨:露出→押さえ長押し→抜去',ok&&f.pulledCount===1);
+  G.pressed=false; stAll(f);
+  stGo(2); f=G.fish; doRotate();
+  rec('さば回転',stUntil(function(){ return !G.anim&&Math.abs(f.angCur-Math.PI)<0.01; },40));
+  G.pressed=false; stAll(f);
+  stGo(3); f=G.fish; doFlip();
+  rec('かれい裏返し',stUntil(function(){ return !G.anim&&f.side===1; },40));
+  stAll(f);
+  stGo(4); f=G.fish; G.pressed=false;
+  pts=spinePts(f); c0=Math.floor(f.N/2); sy=pts[c0].y; sx=f.segs[c0].x;
+  w=stPtr(f,sx,sy); ok=tryOpenDrag({x:w.x,y:w.y}); doOpen();
+  rec('ほっけ開放:未熟は拒否',!ok&&!G.openDrag&&f.split===0&&!G.anim);
+  stMid(f); update(0.05);
+  G.pressed=true; stPtr(f,sx,sy); tryOpenDrag({x:G.ptr.x,y:G.ptr.y});
+  half=0;
+  for(k=1;k<=3;k++){ stPtr(f,sx+f.fishLen*0.09*k,sy); stSim(2); if(k===2) half=f.split; }
+  G.pressed=false;
+  ok=stUntil(function(){ return !G.openDrag&&f.split<0.05; },80);
+  rec('ほっけ開放:途中で離すと戻る+中骨が覗く',splitReady(f)&&half>0.15&&ok);
+  G.pressed=true; stPtr(f,sx,sy); tryOpenDrag({x:G.ptr.x,y:G.ptr.y});
+  half=0;
+  for(k=1;k<=6;k++){ stPtr(f,sx+f.fishLen*0.07*k,sy); stSim(2); if(k===4) half=f.split; }
+  render(); G.pressed=false;
+  rec('ほっけ開放:指で引き開ける(splitが指に追従)',f.split===1&&!G.openDrag&&half>0.5&&G.fibers.length>0);
+  retryStage(); G.bannerT=2.7; update(0.05); f=G.fish; stMid(f); doOpen();
+  rec('ほっけ開放:O補助でも開く(PC同等)',stUntil(function(){ return !G.anim&&f.split===1; },40));
+  G.pressed=false; stAll(f);
+  stGo(5); f=G.fish; G.timer=0.05; G.pressed=false;
+  stUntil(function(){ return G.scene==='fail'; },20); render();
+  rec('時間切れ:鯛の鯛未発見のままfail',G.scene==='fail'&&!G.run.taitaiFound&&!G.run.taitaiSwallowed&&failShareText().indexOf('焼き魚')>=0);
+  retryStage(); rec('同膳リトライ(retries加算)',G.scene==='intro'&&G.run.retries===2);
+  G.bannerT=2.7; update(0.05); f=G.fish; tc=f.cells[f.taitai.cell]; tc.dmg=0.6; update(0.05);
+  G.pressed=true; stPtr(f,f.taitai.x,f.taitai.y+offSide(f,tc.side)); tryPull({x:G.ptr.x,y:G.ptr.y});
+  flexed=false;
+  stUntil(function(){ if(f.pullFlex>0.05) flexed=true; return G.run.taitaiFound; },40);
+  rec('鯛の鯛:きらめき→長押し引き抜き→発見',G.run.taitaiFound&&flexed);
+  G.pressed=false; stAll(f);
+  ok=stUntil(function(){ return G.scene==='taitai'; },80); render();
+  rec('6膳完走→鯛の鯛演出→リザルト+セーブ',ok&&stUntil(function(){ return G.scene==='result'; },160)&&G.run.saved===true);
+  render();
+  var txt=shareText(); doShare();
+  rec('リザルト共有文(doShare)',txt.indexOf('骨格完全度')>=0);
+  startRun(); rec('もう一度(startRun)',G.scene==='intro'&&G.stage===0);
+  G.bannerT=2.7; update(0.05); f=G.fish; stAll(f);
+  rec('零傷賛辞:折らずに第1膳クリア→館長テロップ',G.zeroPraise===true&&!!G.curator&&G.curator.text.indexOf('考古学的に完食')>=0);
+  rec('セーブ合成:称号・前回ベスト退避',typeof G.prevBestAvg==='number'&&typeof G.prevLeastBrk==='number'&&!!earnedTitles().polite);
+  stGo(5); f=G.fish; killCell(f,f.cells[f.taitai.cell]);
+  rec('鯛の鯛:嚥下(飲み込む)もあり得る',G.run.taitaiSwallowed===true);
+}
+function runSelfTest(){
+  if(ST.on) return;
+  ST.on=true; ST.steps=[]; ST.total=0; ST.pass=0; ST.ok={};
+  var errs=0, orig=null;
+  try{ orig=console.error; console.error=function(){ errs++; try{ orig.apply(console,arguments); }catch(e){} }; }catch(e){}
+  try{ selfTestBody(); }catch(e){ ST.fatal=String(e&&e.message||e); errs++; try{ if(orig) orig.call(console,'[selftest]',e); }catch(e2){} }
+  try{ if(orig) console.error=orig; }catch(e){}
+  ST.err=errs;
+  try{ G.pressed=false; G.pull=null; G.openDrag=null; G.anim=null; G.curator=null; G.zeroPraise=false; newRun(); G.fish=null; G.scene='title'; }catch(e){}
+  var t0=performance.now(), n=0;
+  var ev=function(){ n++; if(performance.now()-t0<700) requestAnimationFrame(ev);
+    else{
+      ST.fps=Math.round(n/((performance.now()-t0)/1000));
+      var failed=[];
+      for(var i=0;i<ST.steps.length;i++) if(!ST.steps[i].ok) failed.push(ST.steps[i].step);
+      try{
+        if(window.__ykh) window.__ykh.testResult={ok:ST.pass===ST.total&&ST.err===0&&!ST.fatal,pass:ST.pass,total:ST.total,
+          failed:failed,consoleErrors:ST.err,fatal:ST.fatal,fpsTitle:ST.fps,steps:ST.steps,ok:ST.ok,testedAt:new Date().toISOString()};
+      }catch(e){}
+      try{ if(evdEl) evdEl.textContent='収蔵点検 '+ST.pass+'/'+ST.total+(failed.length?' 未達:'+failed.slice(0,2).join('・'):'通過')+' 折損/小骨/回転/裏返し/開き/皮/零傷/鯛の鯛3態/共有/もう一度 fps'+ST.fps; }catch(e){}
+    } };
+  requestAnimationFrame(ev);
+}
+var last=performance.now();
+function loop(now){
+  try{
+    var dt=(now-last)/1000;
+    last=now;
+    if(dt<0) dt=0;
+    if(dt>0.05) dt=0.05;
+    update(dt*G.timeScale);
+    render();
+  }catch(e){
+    try{ console.error('[loop]', e); }catch(e2){}
+  }
+  requestAnimationFrame(loop);
+}
+resize();
+statEl=document.getElementById('stat'); evdEl=document.getElementById('evd');
+for(var mi=0;mi<14;mi++) G.motes.push({x:rnd(0,W||800),y:rnd(0,(H||600)*0.7),ph:rnd(0,TAU),r:rnd(0.8,2)});
+G.save=loadSave();
+newRun();
+G.scene='title';
+if(location.protocol==='file:'){ try{ runSelfTest(); }catch(e){} }
+requestAnimationFrame(loop);
+try{
+  window.__ykh={ G:G, STAGES:STAGES, startRun:startRun, startStage:startStage, retryStage:retryStage,
+    doRotate:doRotate, doFlip:doFlip, doOpen:doOpen, doShare:doShare, killCell:killCell,
+    l2w:l2w, w2l:w2l, layout:layout, splitReady:splitReady, spinePts:spinePts, hwRaw:hwRaw, offSide:offSide,
+    runSelfTest:runSelfTest, testResult:null };
+}catch(e){}
+</script>
+</body>
+</html>
