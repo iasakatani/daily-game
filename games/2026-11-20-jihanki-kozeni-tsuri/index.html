@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>自販機の下の500円を、磁石で釣り上げろ。</title>
+<meta property="og:title" content="自販機の下の500円を、磁石で釣り上げろ。">
+<meta property="og:description" content="自販機の下に落ちた小銭を、磁石を吊った紐で釣り上げるゲーム。ガム、排水溝、暴走する磁力、そして自販機の神を越えて、500円を取り返せ。">
+<meta property="og:image" content="screenshot.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#080d18}
+body{position:relative;font-family:"Yu Gothic","Hiragino Kaku Gothic ProN","Meiryo",sans-serif}
+#game{display:block;touch-action:none;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;cursor:crosshair}
+#stat{position:absolute;left:0;right:0;bottom:4px;text-align:center;pointer-events:none;color:rgba(155,181,199,.46);font:600 9px/12px "Yu Gothic","Meiryo",sans-serif;letter-spacing:.08em;white-space:nowrap}
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="自販機の下の小銭を磁石で釣り上げるゲーム"></canvas>
+<div id="stat">DRAG: 磁石を動かす / RELEASE: 巻き上げ / SPACE: 巻き上げ / M: 音</div>
+<script>
+'use strict';
+var TAU=Math.PI*2;
+var CV=document.getElementById('game');
+var X=CV.getContext('2d');
+var W=0,H=0,DPR=1;
+var SANS='"Yu Gothic","Hiragino Kaku Gothic ProN","Meiryo",sans-serif';
+var SERIF='"Yu Mincho","YuMincho","Hiragino Mincho ProN","MS PMincho",serif';
+function clamp(v,a,b){return v<a?a:(v>b?b:v);}
+function lerp(a,b,t){return a+(b-a)*t;}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function ease(t){t=clamp(t,0,1);return t*t*(3-2*t);}
+function fmt(n){return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,',');}
+function dist(x1,y1,x2,y2){var dx=x2-x1,dy=y2-y1;return Math.sqrt(dx*dx+dy*dy);}
+function rr(x,y,w,h,r){
+  r=Math.min(r,w/2,h/2);
+  X.beginPath();
+  X.moveTo(x+r,y);
+  X.lineTo(x+w-r,y);
+  X.quadraticCurveTo(x+w,y,x+w,y+r);
+  X.lineTo(x+w,y+h-r);
+  X.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  X.lineTo(x+r,y+h);
+  X.quadraticCurveTo(x,y+h,x,y+h-r);
+  X.lineTo(x,y+r);
+  X.quadraticCurveTo(x,y,x+r,y);
+  X.closePath();
+}
+function text(s,x,y,size,col,align,font,weight){
+  X.font=(weight||700)+' '+size+'px '+(font||SANS);
+  X.fillStyle=col||'#fff';
+  X.textAlign=align||'center';
+  X.textBaseline='middle';
+  X.fillText(s,x,y);
+}
+function fitText(s,x,y,maxW,size,col,font,weight){
+  var z=size;
+  X.font=(weight||800)+' '+z+'px '+(font||SANS);
+  while(X.measureText(s).width>maxW&&z>10){
+    z--;
+    X.font=(weight||800)+' '+z+'px '+(font||SANS);
+  }
+  text(s,x,y,z,col,'center',font,weight);
+}
+function line(x1,y1,x2,y2,col,w){
+  X.strokeStyle=col;
+  X.lineWidth=w||1;
+  X.beginPath();
+  X.moveTo(x1,y1);
+  X.lineTo(x2,y2);
+  X.stroke();
+}
+function pointSeg(px,py,x1,y1,x2,y2){
+  var dx=x2-x1,dy=y2-y1;
+  var l=dx*dx+dy*dy;
+  var t=l?clamp(((px-x1)*dx+(py-y1)*dy)/l,0,1):0;
+  return dist(px,py,x1+t*dx,y1+t*dy);
+}
+var AU={ctx:null,ok:false,muted:false};
+function audioInit(){
+  if(AU.ctx){
+    try{if(AU.ctx.state==='suspended')AU.ctx.resume();}catch(e){}
+    return;
+  }
+  try{
+    var AC=window.AudioContext||window.webkitAudioContext;
+    if(AC){AU.ctx=new AC();AU.ok=true;}
+  }catch(e){AU.ok=false;}
+}
+function tone(f,d,type,vol,delay,f1){
+  if(!AU.ok||AU.muted)return;
+  try{
+    var t=AU.ctx.currentTime+(delay||0);
+    var o=AU.ctx.createOscillator(),g=AU.ctx.createGain();
+    o.type=type||'sine';
+    o.frequency.setValueAtTime(f,t);
+    if(f1)o.frequency.exponentialRampToValueAtTime(Math.max(30,f1),t+d);
+    g.gain.setValueAtTime(.0001,t);
+    g.gain.exponentialRampToValueAtTime(vol||.08,t+.008);
+    g.gain.exponentialRampToValueAtTime(.0001,t+d);
+    o.connect(g);g.connect(AU.ctx.destination);
+    o.start(t);o.stop(t+d+.03);
+  }catch(e){}
+}
+function noise(d,freq,vol,delay){
+  if(!AU.ok||AU.muted)return;
+  try{
+    var t=AU.ctx.currentTime+(delay||0);
+    var n=Math.max(16,Math.floor(AU.ctx.sampleRate*d));
+    var b=AU.ctx.createBuffer(1,n,AU.ctx.sampleRate),a=b.getChannelData(0);
+    for(var i=0;i<n;i++)a[i]=(Math.random()*2-1)*(1-i/n);
+    var src=AU.ctx.createBufferSource(),bp=AU.ctx.createBiquadFilter(),g=AU.ctx.createGain();
+    src.buffer=b;bp.type='bandpass';bp.frequency.value=freq;bp.Q.value=.8;
+    g.gain.value=vol||.08;
+    src.connect(bp);bp.connect(g);g.connect(AU.ctx.destination);
+    src.start(t);
+  }catch(e){}
+}
+function sClick(){tone(880,.035,'square',.045);}
+function sAttach(heavy){
+  tone(heavy?510:1120,.055,'square',.08,0,heavy?360:760);
+  tone(heavy?90:1700,.08,'triangle',.055,.025);
+}
+function sCoin(){tone(1900,.12,'sine',.1);tone(2650,.18,'sine',.07,.045);tone(3400,.12,'sine',.035,.08);}
+function sDrop(){tone(1350,.22,'triangle',.11,0,430);tone(760,.18,'sine',.08,.09,240);}
+function sGum(){tone(150,.12,'sawtooth',.045,0,90);}
+function sShake(){noise(.055,1200,.045);tone(240,.04,'square',.025);}
+function sClear(){
+  tone(660,.14,'triangle',.09);
+  tone(880,.15,'triangle',.09,.1);
+  tone(1320,.32,'triangle',.09,.21);
+}
+function sFail(){tone(220,.55,'sawtooth',.08,0,65);noise(.2,260,.08);}
+function sCan(){noise(.08,480,.14);tone(105,.16,'square',.09,0,55);}
+function sGod(){
+  tone(110,1.7,'sawtooth',.09,0,55);
+  tone(220,1.5,'triangle',.08,.2,880);
+  noise(1.4,900,.12,.6);
+}
+var STAGES=[
+  {
+    name:'こんにちは、100円',short:'初めの一銭',time:20,target:100,
+    novelty:'基本の振り子',
+    tip:'ドラッグで磁石を硬貨へ。指を離すと、自動で巻き上げる。',
+    hint:'まずは100円。重さで紐が伸びる感触を覚えよう。',
+    after:'100円、生還。だが足下のガムが、こちらを見ている。'
+  },
+  {
+    name:'ガムの海',short:'粘着の洗礼',time:26,target:300,
+    novelty:'粘着ガム・糸引き',
+    tip:'ガムに絡んだら左右に素早く振る。放置すると硬貨が滑り落ちる。',
+    hint:'ピンクのガムは財布より執念深い。左右に振って剥がせ。',
+    after:'ガムを退けた。次の500円は、排水溝の向こうで光っている。'
+  },
+  {
+    name:'排水溝の格子',short:'鉄格子の作法',time:30,target:500,
+    novelty:'磁石を傾けて通り抜け',
+    tip:'速く横へ振ると磁石が縦に傾く。細くなった瞬間、格子を抜けろ。',
+    hint:'格子に当たるなら、思い切り横へ。磁石は縦になって通る。',
+    after:'500円は平成の面影を残していた。自販機が、何かを言いたげに唸る。'
+  },
+  {
+    name:'唸る自販機',short:'振動と落下缶',time:32,target:400,
+    novelty:'コンプレッサー振動・落下缶',
+    tip:'機械の振動で紐が揺れる。赤い落下予告を避け、揺れに逆らわず運べ。',
+    hint:'「コーヒー」が空から降る。街角では、たまにあることだ。',
+    after:'落下缶はやんだ。静寂。磁石が、勝手に強くなっていく。'
+  },
+  {
+    name:'磁力、暴走',short:'鉄の花が咲く',time:35,target:500,
+    novelty:'500円以外を振り落とす選別',
+    tip:'ネジ・鍵・泥除けまで吸う。鉄と100円を左右で振り落とし、500円だけを届けろ。',
+    hint:'鉄の塊では巻き上げられない。左右に振って、500円だけ残せ。',
+    after:'泥除けが落ち、自転車の持ち主がどこかで安堵した。そして、神域が開く。'
+  },
+  {
+    name:'自販機の神',short:'最終関門',time:38,target:500,
+    novelty:'缶を撃つ神・賽銭の500円',
+    tip:'神は赤い照準の先へ缶を撃つ。紐を3度切られたら終わり。500円を賽銭せよ。',
+    hint:'照準が動いたら紐も動かす。最後の500円は、もはや賽銭である。',
+    after:''
+  }
+];
+var G={
+  scene:'title',t:0,stage:0,stageTime:0,stageCollected:0,
+  ptr:{x:0,y:0},pressed:false,reeling:false,reelBlockT:0,
+  hand:{x:0,y:0},magnet:null,items:[],attached:[],
+  run:null,buttons:[],primary:null,particles:[],popups:[],cans:[],
+  dust:[],shake:0,flash:0,flashCol:'#fff',slow:0,
+  ropePulse:0,ropeDamage:0,shakeHeat:0,lastSwing:0,lastReverse:0,
+  spawnCan:0,stageEndT:0,interT:0,failReason:'',failTitle:'',
+  finaleT:0,godRise:0,godExploded:false,resultT:0,
+  hint:'',hintT:0,toast:'',toastT:0,emptyCount:0,
+  pausedFrom:'play',lastTick:99,uiConsumed:false,
+  fps:60,frames:0,fpsT:0
+};
+function layout(){
+  var compact=H<610;
+  var mw=Math.min(W*.78,480);
+  var mh=compact?155:Math.min(226,H*.31);
+  var my=compact?68:82;
+  var ground=H-(compact?52:70);
+  var half=Math.min(W*.43,300);
+  return{
+    cx:W/2,mw:mw,mh:mh,mx:W/2-mw/2,my:my,
+    machineBottom:my+mh,handY:my+mh+5,
+    ground:ground,floor:ground-22,half:half,
+    left:W/2-half,right:W/2+half,
+    grateY:ground-75,collectY:my+mh+28,
+    compact:compact
+  };
+}
+function totalAmount(){
+  if(!G.run)return 0;
+  var n=0;
+  for(var i=0;i<G.run.records.length;i++)n+=G.run.records[i].amount;
+  return n;
+}
+function clearedCount(){
+  if(!G.run)return 0;
+  var n=0;
+  for(var i=0;i<G.run.records.length;i++)if(G.run.records[i].status==='clear')n++;
+  return n;
+}
+function newRun(){
+  var records=[];
+  for(var i=0;i<STAGES.length;i++)records.push({status:'未着',amount:0,drops:0,time:0});
+  G.run={records:records,treasures:[],retries:0,drops:0};
+}
+function coin(nx,value,depth,year){
+  return{kind:'coin',nx:nx,value:value,depth:depth||0,year:year||'',state:'idle',r:value===500?17:14,spin:0,angle:rnd(-.3,.3),strain:0};
+}
+function thing(kind,nx,depth,label){
+  return{kind:kind,nx:nx,depth:depth||0,label:label||kind,state:'idle',r:kind==='mudguard'?25:14,spin:0,angle:rnd(-.5,.5),strain:0,attachT:0,lastSlip:0};
+}
+function buildItems(si){
+  var a=[];
+  if(si===0){
+    a.push(coin(.12,100,0));
+  }else if(si===1){
+    a.push(coin(-.63,100,0),coin(-.12,100,0),coin(.35,100,0),coin(.68,100,0));
+    a.push(thing('gum',-.36,0,'ガム（10年もの）'));
+    a.push(thing('gum',.16,0,'ガム（まだ柔らかい）'));
+  }else if(si===2){
+    a.push(coin(0,500,27,'平成31年'));
+    a.push(thing('denture',-.58,0,'誰かの入れ歯'));
+  }else if(si===3){
+    a.push(coin(-.7,100,0),coin(-.35,100,0),coin(0,100,0),coin(.36,100,0),coin(.7,100,0));
+    a.push(thing('screw',.55,0,'謎のネジ'));
+  }else if(si===4){
+    a.push(coin(.05,500,0,'平成31年'),coin(-.65,100,0));
+    a.push(thing('screw',-.34,0,'ネジ（頭が丸い）'));
+    a.push(thing('screw',.44,0,'ネジ（なめている）'));
+    a.push(thing('key',-.48,0,'誰かの自転車の鍵'));
+    a.push(thing('mudguard',.68,0,'自転車の泥除け'));
+  }else if(si===5){
+    a.push(coin(0,500,14,'神代'));
+    a.push(thing('pottery',-.64,0,'縄文土器（なぜか磁着）'));
+    a.push(thing('denture',.63,0,'神の入れ歯'));
+  }
+  var L=layout();
+  for(var i=0;i<a.length;i++){
+    a[i].id=i;
+    a[i].x=L.cx+a[i].nx*L.half;
+    a[i].y=L.floor-a[i].depth;
+    a[i].homeX=a[i].x;a[i].homeY=a[i].y;
+    a[i].vx=0;a[i].vy=0;
+  }
+  return a;
+}
+function resetStage(si){
+  var L=layout(),S=STAGES[si];
+  G.stage=si;G.scene='intro';G.stageTime=S.time;G.stageCollected=0;
+  G.pressed=false;G.reeling=false;G.reelBlockT=0;
+  G.hand.x=L.cx;G.hand.y=L.handY;
+  G.magnet={x:L.cx,y:L.handY+76,vx:0,vy:0,angle:0,av:0};
+  G.ptr.x=L.cx;G.ptr.y=L.handY+150;
+  G.items=buildItems(si);G.attached=[];G.cans=[];
+  G.ropePulse=0;G.ropeDamage=0;G.shakeHeat=0;G.lastSwing=0;
+  G.spawnCan=si===3?2.5:2.0;G.stageEndT=0;G.finaleT=0;G.godRise=0;G.godExploded=false;
+  G.hint=S.hint;G.hintT=7;G.emptyCount=0;G.lastTick=99;
+  if(G.run){
+    G.run.records[si].status='挑戦中';G.run.records[si].amount=0;
+    G.run.records[si].drops=0;G.run.records[si].time=0;
+    var kept=[];
+    for(var i=0;i<G.run.treasures.length;i++)if(G.run.treasures[i].stage!==si)kept.push(G.run.treasures[i]);
+    G.run.treasures=kept;
+  }
+}
+function startRun(){newRun();resetStage(0);}
+function beginPlay(){
+  G.scene='play';G.hintT=7;
+  G.primary=null;
+  sClick();
+}
+function retryStage(){
+  if(!G.run)newRun();
+  G.run.retries++;
+  resetStage(G.stage);
+}
+function goTitle(){
+  G.scene='title';G.pressed=false;G.reeling=false;G.cans=[];
+}
+function showResult(){
+  G.scene='result';G.resultT=0;G.pressed=false;G.reeling=false;
+  var n=clearedCount(),mood=godMood();
+  var rank=resultTitle();
+  G.shareText='【本日の回収額 ¥'+fmt(totalAmount())+'】\n称号「'+rank+'」\n'+n+'/6関門クリア・神様の機嫌 '+mood+'%\nお宝: '+treasureNames()+'\n#自販機の下の500円 #ゲーム制作';
+}
+function godMood(){
+  if(!G.run)return 0;
+  return Math.round(clamp(48+clearedCount()*8-G.run.retries*4-G.run.drops*3,3,100));
+}
+function resultTitle(){
+  var n=clearedCount();
+  if(n===6)return godMood()>=85?'自販機の眷属':'小銭の仙人';
+  if(n===5)return '鉄の花の庭師';
+  if(n===4)return '磁力の暴走特急';
+  if(n===3)return '排水溝の交渉人';
+  if(n===2)return 'ガム剥がしの達人';
+  if(n===1)return '百円の友';
+  return '床を見つめる人';
+}
+function treasureNames(){
+  if(!G.run||!G.run.treasures.length)return 'なし（潔白）';
+  var names=[];
+  for(var i=0;i<G.run.treasures.length;i++)if(names.indexOf(G.run.treasures[i].label)<0)names.push(G.run.treasures[i].label);
+  return names.slice(0,5).join(' / ');
+}
+function addPopup(s,x,y,col,size){
+  G.popups.push({s:s,x:x,y:y,t:0,life:1.25,col:col||'#fff',size:size||18});
+  if(G.popups.length>12)G.popups.shift();
+}
+function burst(x,y,col,n,spd){
+  for(var i=0;i<n;i++){
+    var a=rnd(0,TAU),v=rnd(spd*.25,spd);
+    G.particles.push({x:x,y:y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-30,t:0,life:rnd(.35,1.1),col:col,r:rnd(1.5,4),grav:180,shape:i%3});
+  }
+  if(G.particles.length>260)G.particles.splice(0,G.particles.length-260);
+}
+function toast(s){G.toast=s;G.toastT=2.2;}
+function attachedWeight(){
+  var w=0;
+  for(var i=0;i<G.attached.length;i++){
+    var o=G.attached[i];
+    w+=o.kind==='coin'?(o.value===500?1.25:.65):(o.kind==='mudguard'?3.2:o.kind==='gum'?1.2:1);
+  }
+  return w;
+}
+function attachedPos(o){
+  var idx=G.attached.indexOf(o),n=G.attached.length,m=G.magnet;
+  var spread=(idx-(n-1)/2)*.30;
+  var a=m.angle*.35+spread;
+  var rad=o.kind==='mudguard'?40:25;
+  return{
+    x:m.x+Math.sin(a)*rad,
+    y:m.y+14+Math.cos(a)*rad*.58+(o.kind==='mudguard'?12:0),
+    a:a+(o.kind==='coin'?0:m.angle*.2)
+  };
+}
+function attach(o){
+  if(o.state!=='idle')return;
+  var max=G.stage>=4?9:6;
+  if(G.attached.length>=max)return;
+  o.state='attached';o.attachT=0;o.lastSlip=0;o.strain=0;
+  G.attached.push(o);
+  G.ropePulse=1;G.shake=Math.max(G.shake,o.value===500?7:3);
+  G.flash=o.value===500?.18:.07;G.flashCol=o.value===500?'#ffd75a':'#dffaff';
+  var p=attachedPos(o);
+  burst(p.x,p.y,o.kind==='coin'?'#ffd65a':'#b8d6d8',7,75);
+  sAttach(o.value===500||o.kind==='mudguard');
+  if(o.value===500)addPopup('500円、確保。',p.x,p.y-28,'#ffe482',20);
+  else if(o.kind==='coin')addPopup('カチッ',p.x,p.y-22,'#eafcff',14);
+  else if(o.kind==='gum'){addPopup('べとっ',p.x,p.y-20,'#ff9ac2',16);sGum();}
+  else addPopup(o.kind==='mudguard'?'なぜ泥除け？':'ごんっ',p.x,p.y-25,'#b8cad0',14);
+}
+function detach(o,fall,quiet){
+  var idx=G.attached.indexOf(o);
+  if(idx<0)return;
+  var p=attachedPos(o);
+  G.attached.splice(idx,1);
+  o.x=p.x;o.y=p.y;o.angle=p.a;
+  if(fall){
+    o.state='falling';o.vx=G.magnet.vx*.48+rnd(-45,45);o.vy=Math.min(G.magnet.vy*.2,-20);
+    o.spin=rnd(-8,8);
+    if(o.kind==='coin'){
+      G.slow=.32;G.shake=Math.max(G.shake,7);sDrop();
+      addPopup('あっ',o.x,o.y-18,'#ffcc75',22);
+    }else if(!quiet){tone(330,.09,'square',.05,0,130);}
+  }else{o.state='deposited';}
+}
+function shakeOff(o){
+  if(G.attached.indexOf(o)<0)return;
+  var p=attachedPos(o);
+  detach(o,true,false);
+  o.strain=0;
+  burst(p.x,p.y,o.kind==='gum'?'#ff8eb7':'#a9b6ba',8,110);
+  addPopup(o.kind==='gum'?'ビヨーン！':'選別！',p.x,p.y-15,o.kind==='gum'?'#ff9fc5':'#d9f7ff',15);
+  G.shakeHeat=Math.min(1,G.shakeHeat+.22);
+}
+function fail(reason,title){
+  if(G.scene!=='play')return;
+  G.scene='fail';G.failReason=reason;G.failTitle=title||'紐と小銭、無事ではない。';
+  G.pressed=false;G.reeling=false;G.slow=.5;G.shake=12;G.flash=.22;G.flashCol='#ff5c65';
+  if(G.run)G.run.records[G.stage].status='fail';
+  sFail();
+}
+function clearStage(){
+  if(G.scene!=='play')return;
+  G.scene='clearing';G.stageEndT=0;G.pressed=false;G.reeling=false;
+  var r=G.run.records[G.stage];r.status='clear';r.time=STAGES[G.stage].time-G.stageTime;
+  G.flash=.35;G.flashCol='#ffe28a';G.shake=7;
+  burst(G.magnet.x,G.magnet.y,'#ffd85e',45,230);
+  sClear();
+}
+function deposit(){
+  var L=layout();
+  if(G.stage===4){
+    for(var j=0;j<G.attached.length;j++){
+      var q=G.attached[j];
+      if(q.kind!=='coin'||q.value!==500){
+        addPopup('神は選別を望んでいる',L.cx,L.handY+75,'#ff9b9b',16);
+        G.reelBlockT=1.1;
+        return;
+      }
+    }
+  }
+  if(!G.attached.length){
+    G.emptyCount++;
+    addPopup(G.emptyCount===1?'空振り。磁石も少し恥ずかしい。':'空の磁石が、静かに帰還。',L.cx,L.handY+48,'#b9c8d2',14);
+    tone(230,.08,'triangle',.035);
+    G.reeling=false;
+    return;
+  }
+  var got=0,labels=[];
+  var copy=G.attached.slice();
+  for(var i=0;i<copy.length;i++){
+    var o=copy[i],p=attachedPos(o);
+    if(o.kind==='coin'){
+      got+=o.value;
+      if(o.year)labels.push(o.year+'の'+o.value+'円玉');
+      burst(p.x,p.y,'#ffdb63',12,150);
+    }else{
+      labels.push(o.label);
+      burst(p.x,p.y,'#b9d6d2',6,90);
+    }
+    detach(o,false,true);
+  }
+  G.stageCollected+=got;
+  var rec=G.run.records[G.stage];rec.amount=G.stageCollected;
+  for(var k=0;k<labels.length;k++)G.run.treasures.push({stage:G.stage,label:labels[k]});
+  sCoin();
+  G.flash=.16;G.flashCol='#ffe690';
+  addPopup('回収 ¥'+fmt(got),L.cx,L.handY+58,'#ffe17b',24);
+  G.reeling=false;
+  if(G.stageCollected>=STAGES[G.stage].target){
+    if(G.stage===5)startFinale();
+    else clearStage();
+  }else{
+    G.hint='あと ¥'+fmt(STAGES[G.stage].target-G.stageCollected)+'。磁石をもう一度下ろそう。';G.hintT=4;
+  }
+}
+function startFinale(){
+  G.scene='finale';G.finaleT=0;G.godRise=0;G.godExploded=false;
+  G.pressed=false;G.reeling=false;
+  G.run.records[5].status='clear';
+  G.run.records[5].time=STAGES[5].time-G.stageTime;
+  G.run.treasures.push({stage:5,label:'自販機の御神体'});
+  sGod();
+}
+function spawnCan(){
+  var L=layout(),targetX;
+  if(G.stage===5)targetX=lerp(G.hand.x,G.magnet.x,rnd(.35,.8));
+  else targetX=clamp(G.magnet.x+rnd(-90,90),L.left+20,L.right-20);
+  G.cans.push({x:targetX,y:L.handY-30,vy:0,state:'warn',t:0,angle:rnd(-.4,.4),hit:false,life:5});
+  if(G.stage===5)tone(480,.12,'square',.045);
+}
+function updateCans(dt){
+  var L=layout();
+  for(var i=G.cans.length-1;i>=0;i--){
+    var c=G.cans[i];c.t+=dt;
+    if(c.state==='warn'){
+      if(c.t>(G.stage===5?.72:.9)){
+        c.state='fall';c.t=0;c.vy=40;c.y=L.handY-10;
+        noise(.06,650,.04);
+      }
+    }else if(c.state==='fall'){
+      c.vy+=760*dt;c.y+=c.vy*dt;c.angle+=dt*4;
+      if(!c.hit&&G.magnet){
+        var dRope=pointSeg(c.x,c.y,G.hand.x,G.hand.y,G.magnet.x,G.magnet.y);
+        var dMag=dist(c.x,c.y,G.magnet.x,G.magnet.y);
+        if(dMag<28||dRope<9){
+          c.hit=true;c.state='ground';c.vy=0;c.y=Math.min(c.y,L.floor-8);
+          G.shake=11;G.flash=.12;G.flashCol='#ff9a69';sCan();
+          burst(c.x,c.y,'#b9d5df',16,180);
+          if(G.stage===5){
+            G.ropeDamage++;
+            addPopup('紐が裂けた！ '+(3-G.ropeDamage)+'/'+'3',c.x,c.y-20,'#ff8383',16);
+            if(G.ropeDamage>=3){fail('神の缶が、紐を三度切った。','お釣りは、天袋へ。');}
+          }else{
+            var coins=[];
+            for(var j=0;j<G.attached.length;j++)if(G.attached[j].kind==='coin')coins.push(G.attached[j]);
+            if(coins.length)detach(coins[coins.length-1],true,false);
+            G.magnet.vx+=rnd(-230,230);
+          }
+        }
+      }
+      if(c.y>L.floor){
+        c.y=L.floor;c.state='ground';c.t=0;sCan();
+        G.shake=Math.max(G.shake,4);burst(c.x,c.y,'#9eabb0',8,90);
+      }
+    }else if(c.state==='ground'){
+      if(c.t>2.2){G.cans.splice(i,1);continue;}
+    }
+  }
+}
+function updateItems(dt){
+  var L=layout(),m=G.magnet;
+  for(var i=0;i<G.items.length;i++){
+    var o=G.items[i];
+    if(o.state==='idle'){
+      var range=G.stage>=4?(o.kind==='coin'?54:82):30;
+      if(o.kind==='gum')range=29;
+      if(o.kind==='denture'||o.kind==='pottery')range=31;
+      var d=dist(m.x,m.y+18,o.x,o.y);
+      if(d<range+(G.stage>=4?Math.sin(G.t*9+i)*8:0))attach(o);
+      if(G.stage>=4&&o.state==='idle'&&d<range*1.7){
+        o.x+=((m.x-o.x)/Math.max(d,1))*18*dt;
+        o.y+=((m.y+12-o.y)/Math.max(d,1))*18*dt;
+      }
+    }else if(o.state==='attached'){
+      o.attachT+=dt;
+      if(o.kind==='gum'){
+        if(o.attachT>1.45&&o.attachT-o.lastSlip>1.15){
+          o.lastSlip=o.attachT;
+          var coins=[];
+          for(var c=0;c<G.attached.length;c++)if(G.attached[c].kind==='coin')coins.push(G.attached[c]);
+          if(coins.length){
+            detach(coins[coins.length-1],true,false);
+            addPopup('ぬる…',m.x,m.y+45,'#ff9ec2',16);
+          }
+        }
+        if(o.attachT>8&&o.strain<.75){
+          fail('ガムとの距離が、紐と小銭より近くなった。','紐がガムと結婚した。');
+          return;
+        }
+      }
+    }else if(o.state==='falling'){
+      o.vy+=720*dt;o.x+=o.vx*dt;o.y+=o.vy*dt;o.angle+=o.spin*dt;
+      o.vx*=Math.pow(.992,dt*60);
+      if(o.y>=L.floor){
+        o.y=L.floor;o.vy*=-.26;o.vx*=.65;o.spin*=.65;
+        if(Math.abs(o.vy)<45){
+          o.state='lost';o.vy=0;o.spin=0;o.angle=rnd(-.3,.3);
+          if(o.kind==='coin'){
+            G.run.drops++;G.run.records[G.stage].drops++;
+            tone(560,.16,'triangle',.06,0,180);
+            var potential=G.stageCollected;
+            for(var z=0;z<G.items.length;z++){
+              var p=G.items[z];
+              if(p.kind==='coin'&&(p.state==='idle'||p.state==='attached'||p.state==='falling'))potential+=p.value;
+            }
+            if(potential<STAGES[G.stage].target){
+              fail('必要な硬貨が、排水溝の彼方へ回転していった。','排水溝が、お釣りを受け取った。');
+              return;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+function grateBars(){
+  var L=layout(),bars=[];
+  for(var x=L.left+7;x<L.right;x+=42){
+    if(Math.abs(x-L.cx)<28)continue;
+    bars.push(x);
+  }
+  return bars;
+}
+function collideGrate(oldY){
+  if(G.stage!==2)return;
+  var L=layout(),m=G.magnet;
+  var half=Math.abs(Math.cos(m.angle))*17+Math.abs(Math.sin(m.angle))*6;
+  if(m.y+half<L.grateY-10||m.y-half>L.grateY+10)return;
+  var bars=grateBars();
+  for(var i=0;i<bars.length;i++){
+    var bx=bars[i];
+    if(Math.abs(m.x-bx)<half+4){
+      var side=m.x<bx?-1:1;
+      m.x=bx+side*(half+5);
+      m.vx=side*Math.max(45,Math.abs(m.vx)*.4);
+      if(oldY<L.grateY&&m.vy>0)m.vy=-Math.abs(m.vy)*.25;
+      if(oldY>L.grateY&&m.vy<0)m.vy=Math.abs(m.vy)*.25;
+      G.ropePulse=.5;G.shake=Math.max(G.shake,2);
+      tone(170,.035,'square',.025);
+      G.hint='横へ速く振ると、磁石が細くなる。';G.hintT=2;
+      break;
+    }
+  }
+}
+function updateMagnet(dt){
+  var L=layout(),m=G.magnet;
+  if(!m)return;
+  var weight=attachedWeight();
+  var tx,ty;
+  if(G.pressed){
+    G.hand.x=lerp(G.hand.x,clamp(G.ptr.x,L.left,L.right),1-Math.pow(.0005,dt));
+    tx=G.ptr.x;
+    ty=clamp(G.ptr.y,L.handY+43,L.floor-10)+weight*2.2;
+  }else if(G.reeling){
+    G.hand.x=lerp(G.hand.x,L.cx,1-Math.pow(.002,dt));
+    tx=L.cx;ty=L.handY+18;
+    var blocked=false;
+    if(G.stage===4){
+      for(var i=0;i<G.attached.length;i++){
+        var o=G.attached[i];
+        if(o.kind!=='coin'||o.value!==500){blocked=true;break;}
+      }
+    }
+    if(blocked){
+      ty=L.handY+110;G.reelBlockT+=dt;
+      if(G.reelBlockT>.75){
+        G.reeling=false;G.reelBlockT=0;
+        G.hint='重い！左右に速く振って、500円以外を落とす。';G.hintT=5;
+        addPopup('鉄の塊が重すぎる',m.x,m.y-32,'#ff9b9b',16);
+      }
+    }else{G.reelBlockT=0;}
+  }else{
+    tx=m.x;ty=m.y;
+    m.vx*=Math.pow(.25,dt);m.vy*=Math.pow(.25,dt);
+  }
+  var oldY=m.y;
+  if(G.pressed||G.reeling){
+    var k=(G.reeling?11:13)/(1+weight*.13);
+    var damp=G.reeling?4.4:3.5;
+    m.vx+=(tx-m.x)*k*dt;
+    m.vy+=(ty-m.y)*k*dt;
+    if(G.pressed)m.vy+=24*dt;
+    m.vx*=Math.exp(-damp*dt);m.vy*=Math.exp(-damp*dt);
+    if(G.stage>=3){
+      var vibration=(G.stage===5?230:145);
+      m.vx+=Math.sin(G.t*(G.stage===5?27:22))*vibration*dt;
+      m.vy+=Math.sin(G.t*31)*vibration*.18*dt;
+    }
+    m.x+=m.vx*dt;m.y+=m.vy*dt;
+  }
+  m.x=clamp(m.x,L.left+10,L.right-10);
+  var minY=L.handY+(G.reeling?18:35);
+  m.y=clamp(m.y,minY,L.floor-7);
+  collideGrate(oldY);
+  var targetAngle=clamp(m.vx*.0042+Math.sin(G.t*4)*weight*.016,-1.28,1.28);
+  m.av+=(targetAngle-m.angle)*20*dt;
+  m.av*=Math.exp(-6*dt);m.angle+=m.av*dt;
+  G.ropePulse=Math.max(0,G.ropePulse-dt*2.5);
+  if(G.reeling&&m.y<L.handY+46&&Math.abs(m.x-L.cx)<70&&!G.reelBlockT)deposit();
+}
+function updateShake(dt){
+  if(!G.pressed||!G.magnet)return;
+  var vx=G.magnet.vx,sign=vx>0?1:-1;
+  if(Math.abs(vx)>125){
+    if(G.lastSwing&&sign!==G.lastSwing&&G.t-G.lastReverse<.65){
+      G.shakeHeat=Math.min(1,G.shakeHeat+.25);
+      sShake();
+      for(var i=G.attached.length-1;i>=0;i--){
+        var o=G.attached[i];
+        var eligible=o.kind!=='coin'||(G.stage===4&&o.value!==500);
+        if(eligible){
+          o.strain+=o.kind==='mudguard'?.19:o.kind==='gum'?.30:.36;
+          if(o.strain>=1)shakeOff(o);
+        }
+      }
+      G.lastReverse=G.t;
+    }
+    G.lastSwing=sign;
+  }
+  G.shakeHeat=Math.max(0,G.shakeHeat-dt*.22);
+}
+function updateParticles(dt){
+  for(var i=G.particles.length-1;i>=0;i--){
+    var p=G.particles[i];p.t+=dt;
+    if(p.t>p.life){G.particles.splice(i,1);continue;}
+    p.vy+=p.grav*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
+    p.vx*=Math.pow(.98,dt*60);
+  }
+  for(var j=G.popups.length-1;j>=0;j--){
+    var q=G.popups[j];q.t+=dt;q.y-=24*dt;
+    if(q.t>q.life)G.popups.splice(j,1);
+  }
+}
+function initDust(){
+  G.dust=[];
+  for(var i=0;i<45;i++)G.dust.push({x:Math.random(),y:Math.random(),r:rnd(.5,2),s:rnd(.02,.12),p:rnd(0,TAU)});
+}
+function update(dt){
+  G.t+=dt;
+  G.shake=Math.max(0,G.shake-dt*22);
+  G.flash=Math.max(0,G.flash-dt*1.8);
+  G.toastT=Math.max(0,G.toastT-dt);
+  var sim=G.slow>0?dt*.27:dt;
+  G.slow=Math.max(0,G.slow-dt);
+  updateParticles(dt);
+  if(G.scene==='play'){
+    G.stageTime=Math.max(0,G.stageTime-dt);
+    G.hintT=Math.max(0,G.hintT-dt);
+    updateMagnet(sim);
+    updateShake(sim);
+    updateItems(sim);
+    if(G.stage>=3){
+      G.spawnCan-=dt;
+      if(G.spawnCan<=0){spawnCan();G.spawnCan=G.stage===5?rnd(1.65,2.35):rnd(2.6,3.5);}
+      updateCans(sim);
+    }
+    var sec=Math.ceil(G.stageTime);
+    if(sec<=5&&sec!==G.lastTick){tone(1200,.04,'square',.045);G.lastTick=sec;}
+    if(G.stageTime<=0)fail('時間切れ。500円は今夜も、自販機の下で眠る。','小銭は、宵の口に消えた。');
+  }else if(G.scene==='finale'){
+    G.finaleT+=dt;
+    G.godRise=ease((G.finaleT-.6)/2.2);
+    if(G.finaleT>2.8&&!G.godExploded){
+      G.godExploded=true;G.flash=1;G.flashCol='#fff4ba';G.shake=24;
+      var L=layout();burst(L.cx,L.my+L.mh/2,'#ffd34f',150,420);
+      noise(.8,500,.18);tone(65,1.1,'sawtooth',.14,0,32);
+    }
+    if(G.finaleT>4.8)showResult();
+  }else if(G.scene==='clearing'){
+    G.stageEndT+=dt;
+  }else if(G.scene==='result'){
+    G.resultT+=dt;
+  }
+}
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  W=window.innerWidth;H=window.innerHeight;
+  CV.width=Math.round(W*DPR);CV.height=Math.round(H*DPR);
+  CV.style.width=W+'px';CV.style.height=H+'px';
+  X.setTransform(DPR,0,0,DPR,0,0);
+  var L=layout();
+  if(G.items){
+    for(var i=0;i<G.items.length;i++){
+      var o=G.items[i];
+      if(o.state==='idle'||o.state==='lost'){
+        o.x=L.cx+o.nx*L.half;o.y=L.floor-o.depth;
+        o.homeX=o.x;o.homeY=o.y;
+      }
+    }
+  }
+  if(G.magnet){G.magnet.x=clamp(G.magnet.x,L.left,L.right);G.magnet.y=clamp(G.magnet.y,L.handY+20,L.floor);}
+}
+window.addEventListener('resize',resize);
+function button(id,label,x,y,w,h,primary,action){
+  G.buttons.push({id:id,x:x,y:y,w:w,h:h,action:action});
+  X.save();
+  X.shadowColor=primary?'rgba(255,191,62,.38)':'rgba(0,0,0,.35)';
+  X.shadowBlur=primary?18:8;
+  rr(x,y,w,h,Math.min(13,h/2));
+  X.fillStyle=primary?'#f3b832':'#172534';X.fill();
+  X.shadowBlur=0;
+  X.strokeStyle=primary?'#ffe79a':'#526a79';X.lineWidth=1.5;X.stroke();
+  text(label,x+w/2,y+h/2+1,Math.min(17,h*.34),primary?'#251706':'#e7f4f7','center',SANS,800);
+  X.restore();
+}
+function drawBackground(){
+  var L=layout();
+  var g=X.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#07101f');g.addColorStop(.55,'#142333');g.addColorStop(1,'#172028');
+  X.fillStyle=g;X.fillRect(0,0,W,H);
+  X.fillStyle='#0b1424';X.fillRect(0,0,W,Math.min(64,H*.1));
+  for(var i=0;i<12;i++){
+    var bx=(i*173+31)%W,by=20+(i*47)%95;
+    X.fillStyle=i%3===0?'#e7d797':'#527082';
+    X.globalAlpha=.12+.07*Math.sin(G.t*.4+i);
+    X.fillRect(bx,by,2,2);
+  }
+  X.globalAlpha=1;
+  X.fillStyle='#1b2a36';X.fillRect(0,65,W,L.ground-65);
+  X.strokeStyle='rgba(102,128,141,.12)';X.lineWidth=1;
+  for(var y=92;y<L.ground;y+=56)line(0,y,W,y,'rgba(113,139,150,.09)',1);
+  for(var x=18;x<W;x+=88)line(x,65,x-18,L.ground,'rgba(113,139,150,.055)',1);
+  var fg=X.createLinearGradient(0,L.ground-12,0,H);
+  fg.addColorStop(0,'#4b5153');fg.addColorStop(.15,'#343d41');fg.addColorStop(1,'#161d23');
+  X.fillStyle=fg;X.fillRect(0,L.ground-12,W,H-L.ground+12);
+  X.fillStyle='#697174';X.fillRect(0,L.ground-12,W,3);
+  for(var j=0;j<28;j++){
+    var px=(j*83+17)%W,py=L.ground+5+(j*29)%Math.max(15,H-L.ground-8);
+    X.fillStyle=j%2?'rgba(210,214,201,.08)':'rgba(0,0,0,.12)';
+    X.fillRect(px,py,2+(j%4),1);
+  }
+  X.strokeStyle='rgba(8,12,15,.4)';X.lineWidth=1.4;
+  X.beginPath();X.moveTo(L.left+15,L.ground+6);X.lineTo(L.left+60,L.ground+18);X.lineTo(L.left+93,L.ground+13);X.stroke();
+  drawDrain();
+  for(var k=0;k<G.dust.length;k++){
+    var d=G.dust[k];
+    var dx=((d.x+G.t*d.s*.018)%1)*W;
+    var dy=80+((d.y+Math.sin(G.t*d.s+d.p)*.03)%1)*(L.ground-80);
+    X.globalAlpha=.12+.15*Math.sin(G.t*.7+d.p);
+    X.fillStyle='#d9e0ce';X.beginPath();X.arc(dx,dy,d.r,0,TAU);X.fill();
+  }
+  X.globalAlpha=1;
+  var flicker=.82+.12*Math.sin(G.t*1.7)+(Math.sin(G.t*43)>.97?.13:0);
+  var light=X.createRadialGradient(L.cx,L.my+40,10,L.cx,L.my+60,Math.max(W,H)*.6);
+  light.addColorStop(0,'rgba(185,231,255,'+(.13*flicker)+')');
+  light.addColorStop(1,'rgba(100,160,220,0)');
+  X.fillStyle=light;X.fillRect(0,0,W,H);
+}
+function drawDrain(){
+  var L=layout();
+  X.fillStyle='#0b1116';rr(L.left-8,L.floor+9,L.half*2+16,25,5);X.fill();
+  X.strokeStyle='#536168';X.lineWidth=3;X.stroke();
+  for(var x=L.left;x<L.right;x+=19)line(x,L.floor+11,x+3,L.floor+31,'#2e3a41',5);
+  line(L.left,L.floor+13,L.right,L.floor+13,'rgba(167,187,191,.2)',1);
+  if(G.scene==='play'&&G.run&&G.run.records[G.stage].drops){
+    text('排水溝に '+G.run.records[G.stage].drops+'枚',L.right-4,L.floor+48,11,'#85949a','right',SANS,700);
+  }
+}
+function drawCanShape(x,y,a,scale,label){
+  X.save();X.translate(x,y);X.rotate(a||0);X.scale(scale||1,scale||1);
+  rr(-10,-17,20,34,5);X.fillStyle='#d7d9d1';X.fill();X.strokeStyle='#202b31';X.lineWidth=2;X.stroke();
+  X.fillStyle=label==='神'?'#d54b36':'#a83b2c';X.fillRect(-9,-9,18,19);
+  text(label||'珈琲',0,0,label==='神'?10:6,'#fff1cf','center',SERIF,900);
+  X.fillStyle='#879399';X.beginPath();X.ellipse(0,-15,8,2.5,0,0,TAU);X.fill();
+  X.strokeStyle='#505b60';X.lineWidth=1;X.beginPath();X.ellipse(0,-15,3,1.2,0,0,TAU);X.stroke();
+  X.restore();
+}
+function drawMachine(){
+  var L=layout(),boss=G.stage===5&&(G.scene!=='title');
+  var rise=G.scene==='finale'?G.godRise*(H*.65):0;
+  var vib=G.stage>=3&&(G.scene==='play'||G.scene==='finale')?Math.sin(G.t*30)*(G.stage===5?2.3:1.1):0;
+  var x=L.mx+vib,y=L.my-rise,w=L.mw,h=L.mh;
+  X.save();
+  if(G.scene==='finale'&&G.godExploded)X.globalAlpha=clamp(1-(G.finaleT-2.8)*.8,0,1);
+  X.shadowColor=boss?'rgba(255,187,55,.7)':'rgba(87,191,255,.28)';
+  X.shadowBlur=boss?38:22;
+  rr(x,y,w,h,12);X.fillStyle=boss?'#d8c39a':'#d9e4e5';X.fill();
+  X.shadowBlur=0;X.strokeStyle=boss?'#ffe38a':'#566b73';X.lineWidth=3;X.stroke();
+  X.fillStyle=boss?'#7d1f24':'#b82932';X.fillRect(x+3,y+15,13,h-29);
+  X.fillStyle='#25313a';rr(x+w-30,y+16,20,h-33,4);X.fill();
+  var panelX=x+24,panelY=y+16,panelW=w-64,panelH=h*.54;
+  var pg=X.createLinearGradient(0,panelY,0,panelY+panelH);
+  pg.addColorStop(0,boss?'#fff0a8':'#eafaff');pg.addColorStop(1,boss?'#d8a848':'#92b6c2');
+  X.fillStyle=pg;X.fillRect(panelX,panelY,panelW,panelH);
+  X.strokeStyle='#354952';X.lineWidth=2;X.strokeRect(panelX,panelY,panelW,panelH);
+  var cols=5,cw=panelW/cols;
+  for(var row=0;row<2;row++){
+    for(var i=0;i<cols;i++){
+      var bx=panelX+cw*(i+.5),by=panelY+panelH*(row+.40)/2;
+      var palette=['#b63228','#325d85','#4a853b','#d3942e','#ede2cc'];
+      X.fillStyle=palette[(i+row*2)%palette.length];
+      rr(bx-cw*.16,by-13,cw*.32,26,3);X.fill();
+      X.fillStyle='rgba(255,255,255,.65)';X.fillRect(bx-cw*.11,by-10,2,16);
+      X.fillStyle='#17242a';X.fillRect(bx-cw*.22,by+17,cw*.44,8);
+      text('¥130',bx,by+21,Math.max(6,cw*.13),'#f5f3d9','center',SANS,700);
+    }
+  }
+  if(boss){
+    var eyeY=y+h*.24;
+    X.fillStyle='#501015';
+    X.beginPath();X.moveTo(x+w*.27,eyeY);X.lineTo(x+w*.40,eyeY+8);X.lineTo(x+w*.27,eyeY+12);X.fill();
+    X.beginPath();X.moveTo(x+w*.73,eyeY);X.lineTo(x+w*.60,eyeY+8);X.lineTo(x+w*.73,eyeY+12);X.fill();
+    X.fillStyle='#fff49c';X.beginPath();X.arc(x+w*.32,eyeY+6,3,0,TAU);X.arc(x+w*.68,eyeY+6,3,0,TAU);X.fill();
+    X.strokeStyle='#ffdf64';X.lineWidth=3;
+    X.beginPath();X.ellipse(L.cx,y-16+Math.sin(G.t*3)*3,w*.23,8,0,0,TAU);X.stroke();
+  }
+  var lowerY=panelY+panelH+9;
+  X.fillStyle='#26333a';rr(x+w*.23,lowerY,w*.47,h*.22,5);X.fill();
+  X.fillStyle='#0c1418';rr(x+w*.28,lowerY+7,w*.37,h*.13,4);X.fill();
+  X.fillStyle='rgba(178,214,222,.12)';X.fillRect(x+w*.30,lowerY+10,w*.33,3);
+  X.fillStyle='#141e24';rr(x+w-25,y+h*.63,14,h*.13,3);X.fill();
+  X.fillStyle=G.reeling?'#ffd65a':'#8bb8c1';X.beginPath();X.arc(x+w-18,y+h*.68,2.5,0,TAU);X.fill();
+  text('つり銭',x+w-18,y+h*.80,7,'#35434a','center',SANS,700);
+  X.fillStyle='#75888e';X.fillRect(x+20,y+h-5,34,8);X.fillRect(x+w-54,y+h-5,34,8);
+  if(G.scene==='finale'){
+    X.strokeStyle='#d9c49a';X.lineWidth=8;
+    X.beginPath();X.moveTo(x+32,y+h-2);X.lineTo(x+18,y+h+35);X.moveTo(x+w-32,y+h-2);X.lineTo(x+w-18,y+h+35);X.stroke();
+  }
+  X.restore();
+}
+function drawCoin(o,x,y,a,alpha){
+  var r=o.r||14;
+  X.save();X.translate(x,y);X.rotate(a||0);X.globalAlpha=alpha===undefined?1:alpha;
+  var gold=o.value===500;
+  X.shadowColor=gold?'rgba(255,212,74,.65)':'rgba(199,220,218,.35)';
+  X.shadowBlur=gold?12:5;
+  var g=X.createRadialGradient(-r*.35,-r*.4,1,0,0,r);
+  g.addColorStop(0,gold?'#fff2a6':'#f3f1d7');g.addColorStop(.5,gold?'#d9aa3d':'#bfc3b6');g.addColorStop(1,gold?'#80601e':'#686f6a');
+  X.fillStyle=g;X.beginPath();X.arc(0,0,r,0,TAU);X.fill();
+  X.shadowBlur=0;X.strokeStyle=gold?'#ffe58b':'#e4e5d5';X.lineWidth=1.5;X.stroke();
+  X.strokeStyle=gold?'#8e6a26':'#747c76';X.lineWidth=1;
+  X.beginPath();X.arc(0,0,r*.77,0,TAU);X.stroke();
+  for(var i=0;i<20;i++){
+    var t=i/20*TAU;
+    line(Math.cos(t)*r*.88,Math.sin(t)*r*.88,Math.cos(t)*r*.98,Math.sin(t)*r*.98,gold?'#75561c':'#656b67',.7);
+  }
+  text(String(o.value),0,1,r*(o.value===500?.63:.72),gold?'#6f4d12':'#555d58','center',SERIF,900);
+  if(o.value===500){
+    X.globalAlpha=(alpha===undefined?1:alpha)*(.45+.4*Math.sin(G.t*4+o.id));
+    X.fillStyle='#fff8c2';X.beginPath();X.arc(-r*.36,-r*.38,r*.16,0,TAU);X.fill();
+  }
+  if(o.state==='lost'){
+    X.globalAlpha=.5;X.fillStyle='#071116';X.fillRect(-r,r*.35,r*2,r*.7);
+  }
+  X.restore();
+}
+function drawThing(o,x,y,a){
+  X.save();X.translate(x,y);X.rotate(a||0);
+  if(o.kind==='gum'){
+    X.shadowColor='#ff77ac';X.shadowBlur=5;
+    X.fillStyle=o.state==='lost'?'#86596b':'#d9799e';
+    X.beginPath();
+    for(var i=0;i<12;i++){
+      var t=i/12*TAU,r=12+(i%3)*2;
+      var px=Math.cos(t)*r,py=Math.sin(t)*r*.65;
+      if(i===0)X.moveTo(px,py);else X.lineTo(px,py);
+    }
+    X.closePath();X.fill();X.shadowBlur=0;
+    X.fillStyle='#f3afc5';X.beginPath();X.arc(-4,-3,3,0,TAU);X.fill();
+    X.strokeStyle='#70384e';X.lineWidth=1;X.stroke();
+  }else if(o.kind==='screw'){
+    X.strokeStyle='#1b252b';X.lineWidth=7;line(0,-12,0,12,'#1b252b',7);
+    line(0,-12,0,12,'#aebbc0',4);
+    X.fillStyle='#b9c5c9';X.beginPath();X.arc(0,-12,7,0,TAU);X.fill();X.strokeStyle='#39474e';X.lineWidth=2;X.stroke();
+    line(-4,-12,4,-12,'#4a585e',1.5);
+    for(var y2=-6;y2<10;y2+=4)line(-4,y2,4,y2+2,'#4b5a60',1);
+  }else if(o.kind==='key'){
+    X.strokeStyle='#d0b36a';X.lineWidth=4;
+    X.beginPath();X.arc(0,-8,7,0,TAU);X.moveTo(0,-1);X.lineTo(0,15);X.lineTo(7,15);X.moveTo(0,9);X.lineTo(5,9);X.stroke();
+    X.strokeStyle='#554523';X.lineWidth=1;X.beginPath();X.arc(0,-8,7,0,TAU);X.stroke();
+  }else if(o.kind==='mudguard'){
+    X.strokeStyle='#222d32';X.lineWidth=9;X.beginPath();X.arc(0,7,27,Math.PI*1.08,Math.PI*1.93);X.stroke();
+    X.strokeStyle='#879ba2';X.lineWidth=5;X.beginPath();X.arc(0,7,27,Math.PI*1.08,Math.PI*1.93);X.stroke();
+    line(-23,-1,-29,16,'#65777e',5);
+  }else if(o.kind==='denture'){
+    X.fillStyle='#e79ca6';X.beginPath();X.arc(0,2,17,Math.PI,TAU);X.lineTo(14,8);X.quadraticCurveTo(0,17,-14,8);X.closePath();X.fill();
+    X.strokeStyle='#673d4a';X.lineWidth=1.5;X.stroke();
+    X.fillStyle='#f4e7d2';
+    for(var i=0;i<6;i++){rr(-12+i*4.6,-1,4,9,1);X.fill();X.strokeStyle='#b8aa96';X.stroke();}
+  }else if(o.kind==='pottery'){
+    X.fillStyle='#a75e36';X.strokeStyle='#402b23';X.lineWidth=2;
+    X.beginPath();X.moveTo(-12,-12);X.lineTo(12,-12);X.lineTo(9,13);X.quadraticCurveTo(0,18,-9,13);X.closePath();X.fill();X.stroke();
+    X.strokeStyle='#e1a06a';X.lineWidth=1;
+    for(var yy=-8;yy<10;yy+=5){X.beginPath();X.moveTo(-9,yy);X.lineTo(0,yy+4);X.lineTo(9,yy);X.stroke();}
+  }
+  X.restore();
+}
+function drawGumStrings(){
+  var m=G.magnet;
+  for(var i=0;i<G.attached.length;i++){
+    var o=G.attached[i];
+    if(o.kind!=='gum')continue;
+    var p=attachedPos(o),pull=clamp(dist(o.homeX,o.homeY,p.x,p.y)/160,0,1);
+    X.strokeStyle='rgba(255,148,190,'+(.45+pull*.45)+')';
+    X.lineWidth=2+pull*2;
+    for(var s=0;s<4;s++){
+      X.beginPath();X.moveTo(o.homeX+s*2-3,o.homeY);
+      X.quadraticCurveTo((o.homeX+p.x)/2+Math.sin(G.t*9+s)*5,(o.homeY+p.y)/2,p.x+s-2,p.y);
+      X.stroke();
+    }
+    if(o.attachT>6){text('絡まる！',p.x,p.y-30,13,'#ff739f','center',SANS,900);}
+  }
+}
+function drawRope(){
+  if(!G.magnet)return;
+  var m=G.magnet,h=G.hand,w=attachedWeight();
+  var dx=m.x-h.x,dy=m.y-h.y;
+  var sag=(1-clamp(Math.abs(dx)/160,0,1))*(4+w*2.2);
+  var pulse=G.ropePulse*Math.sin(G.t*65)*5;
+  X.lineCap='round';
+  for(var pass=0;pass<2;pass++){
+    X.strokeStyle=pass===0?'rgba(3,8,11,.7)':'#d7ccb0';
+    X.lineWidth=pass===0?5:2;
+    X.beginPath();X.moveTo(h.x,h.y);
+    var segs=14;
+    for(var i=1;i<=segs;i++){
+      var t=i/segs;
+      var px=lerp(h.x,m.x,t)+Math.sin(t*Math.PI)*sag*Math.sign(dx||1)+Math.sin(t*24+G.t*60)*pulse*t;
+      var py=lerp(h.y,m.y,t)+Math.sin(t*Math.PI)*(w*1.6);
+      X.lineTo(px,py);
+    }
+    X.stroke();
+  }
+  X.fillStyle='#d2c5a6';X.beginPath();X.arc(h.x,h.y,5,0,TAU);X.fill();
+  X.fillStyle='#303d43';X.beginPath();X.arc(h.x,h.y,2,0,TAU);X.fill();
+  for(var d=0;d<G.ropeDamage;d++){
+    var t=.3+d*.2,fx=lerp(h.x,m.x,t),fy=lerp(h.y,m.y,t);
+    line(fx-5,fy-4,fx+4,fy+5,'#f0e5cc',1);
+    line(fx+5,fy-5,fx-3,fy+4,'#f0e5cc',1);
+  }
+  for(var j=0;j<G.attached.length;j++){
+    if(G.attached[j].kind==='gum'&&G.attached[j].attachT>5){
+      X.strokeStyle='#d9789d';X.lineWidth=2;X.beginPath();X.arc(m.x,m.y-15,8+Math.sin(G.t*5)*2,0,TAU);X.stroke();
+    }
+  }
+}
+function drawMagnet(){
+  var m=G.magnet;if(!m)return;
+  X.save();X.translate(m.x,m.y);X.rotate(m.angle);
+  if(G.stage>=4){
+    X.strokeStyle='rgba(113,221,255,'+(.18+.12*Math.sin(G.t*11))+')';X.lineWidth=1.5;
+    for(var i=0;i<3;i++){
+      X.beginPath();X.arc(0,5,29+i*9+Math.sin(G.t*7+i)*3,-.8,.8);X.stroke();
+      X.beginPath();X.arc(0,5,29+i*9+Math.sin(G.t*7+i)*3,Math.PI-.8,Math.PI+.8);X.stroke();
+    }
+  }
+  X.shadowColor='rgba(0,0,0,.6)';X.shadowBlur=7;X.shadowOffsetY=4;
+  X.strokeStyle='#222d35';X.lineWidth=16;
+  X.beginPath();X.arc(0,0,16,0,Math.PI);X.stroke();
+  X.shadowBlur=0;X.shadowOffsetY=0;
+  X.strokeStyle='#bdc7c9';X.lineWidth=11;X.beginPath();X.arc(0,0,16,0,Math.PI);X.stroke();
+  line(-16,0,-16,15,'#c83e43',12);line(16,0,16,15,'#34749b',12);
+  line(-16,0,-16,15,'#ed6b65',7);line(16,0,16,15,'#69a6c6',7);
+  X.fillStyle='#e6e7db';X.fillRect(-23,11,14,7);X.fillRect(9,11,14,7);
+  text('N',-16,15,7,'#81282d','center',SANS,900);text('S',16,15,7,'#193f5d','center',SANS,900);
+  X.restore();
+}
+function drawGrate(){
+  if(G.stage!==2)return;
+  var L=layout(),bars=grateBars();
+  X.fillStyle='rgba(8,14,17,.55)';X.fillRect(L.left-5,L.grateY+12,L.half*2+10,12);
+  for(var i=0;i<bars.length;i++){
+    var x=bars[i];
+    var g=X.createLinearGradient(x-4,0,x+4,0);g.addColorStop(0,'#27343a');g.addColorStop(.5,'#89989b');g.addColorStop(1,'#202a2f');
+    X.fillStyle=g;rr(x-4,L.grateY-13,8,32,2);X.fill();
+    X.strokeStyle='#111a1e';X.lineWidth=1;X.stroke();
+  }
+  line(L.left,L.grateY-12,L.right,L.grateY-12,'#75878c',5);
+  line(L.left,L.grateY+14,L.right,L.grateY+14,'#1a2429',5);
+}
+function drawItems(back){
+  for(var i=0;i<G.items.length;i++){
+    var o=G.items[i];
+    var isAttached=o.state==='attached';
+    if(back===isAttached)continue;
+    if(o.state==='deposited')continue;
+    var x=o.x,y=o.y,a=o.angle;
+    if(isAttached){var p=attachedPos(o);x=p.x;y=p.y;a=p.a;}
+    if(o.state==='idle'&&o.kind==='coin'){
+      X.fillStyle='rgba(0,0,0,.35)';X.beginPath();X.ellipse(x+2,y+o.r*.7,o.r*1.1,o.r*.35,0,0,TAU);X.fill();
+    }
+    if(o.kind==='coin')drawCoin(o,x,y,a,o.state==='lost'?.55:1);
+    else drawThing(o,x,y,a);
+  }
+}
+function drawHazards(){
+  var L=layout();
+  for(var i=0;i<G.cans.length;i++){
+    var c=G.cans[i];
+    if(c.state==='warn'){
+      var p=clamp(c.t/(G.stage===5?.72:.9),0,1);
+      X.strokeStyle='rgba(255,75,65,'+(.35+p*.6)+')';X.lineWidth=2;
+      X.beginPath();X.arc(c.x,L.floor,14+p*10,0,TAU);X.stroke();
+      line(c.x,L.handY,c.x,L.floor-15,'rgba(255,73,63,'+(.15+p*.35)+')',1);
+      text('!',c.x,L.floor-28,22,'#ff7b67','center',SANS,900);
+    }else drawCanShape(c.x,c.y,c.angle,1,G.stage===5?'神':'珈琲');
+  }
+}
+function drawParticles(){
+  for(var i=0;i<G.particles.length;i++){
+    var p=G.particles[i],a=1-p.t/p.life;
+    X.globalAlpha=a;X.fillStyle=p.col;
+    if(p.shape===0){X.fillRect(p.x-p.r,p.y-p.r,p.r*2,p.r*2);}
+    else{X.beginPath();X.arc(p.x,p.y,p.r*a,0,TAU);X.fill();}
+  }
+  X.globalAlpha=1;
+  for(var j=0;j<G.popups.length;j++){
+    var q=G.popups[j];
+    X.globalAlpha=clamp((q.life-q.t)*2,0,1);
+    X.shadowColor='#081018';X.shadowBlur=4;
+    text(q.s,q.x,q.y,q.size,q.col,'center',SANS,900);X.shadowBlur=0;
+  }
+  X.globalAlpha=1;
+}
+function drawHud(){
+  var L=layout(),S=STAGES[G.stage];
+  X.fillStyle='rgba(5,12,20,.87)';X.fillRect(0,0,W,65);
+  X.fillStyle=G.stage===5?'#d6a943':'#5f889b';X.fillRect(0,63,W,2);
+  text('第'+(G.stage+1)+'関門',14,17,10,'#91adba','left',SANS,800);
+  fitText(S.name,14+Math.min(65,W*.17),36,Math.min(W*.42,220),18,'#f0f4ed',SANS,900);
+  X.textAlign='left';
+  text('第'+(G.stage+1)+'関門',14,17,10,'#91adba','left',SANS,800);
+  text('回収 ¥'+fmt(G.stageCollected)+' / ¥'+fmt(S.target),16,51,12,G.stageCollected>=S.target?'#ffe176':'#d2e0e4','left',SANS,800);
+  var urgent=G.stageTime<=5;
+  text(Math.ceil(G.stageTime)+'秒',W*.64,33,urgent?28:25,urgent?'#ff766f':'#f2e9cc','center',SANS,900);
+  if(urgent)X.globalAlpha=.7+.3*Math.sin(G.t*12);
+  text('残り',W*.64,13,9,'#91a6b0','center',SANS,700);X.globalAlpha=1;
+  if(G.scene==='play'){
+    button('sound',AU.muted?'音×':'音',W-47,10,34,23,false,function(){AU.muted=!AU.muted;sClick();});
+    button('pause','Ⅱ',W-47,38,34,22,false,function(){G.pausedFrom='play';G.scene='pause';G.pressed=false;});
+  }
+  if(G.hintT>0){
+    var a=clamp(G.hintT,0,1);
+    X.globalAlpha=a;
+    var hw=Math.min(W-28,510);
+    rr(L.cx-hw/2,70,hw,34,9);X.fillStyle='rgba(7,15,23,.82)';X.fill();
+    fitText(G.hint,L.cx,87,hw-20,12,'#d9e5e5',SANS,700);
+    X.globalAlpha=1;
+  }
+  if(G.stage>=4&&G.attached.length){
+    var iron=0;
+    for(var i=0;i<G.attached.length;i++)if(G.attached[i].kind!=='coin'||G.attached[i].value!==500)iron++;
+    if(iron)text('鉄の花 '+iron+'個：左右に振って選別',L.cx,H-25,12,'#ffb192','center',SANS,800);
+    else text('500円だけ。指を離して巻き上げ！',L.cx,H-25,13,'#ffe37c','center',SANS,900);
+  }else if(G.pressed){
+    text('指を離すと巻き上げ',L.cx,H-25,12,'#a9c6cf','center',SANS,700);
+  }else if(!G.reeling){
+    text('画面をドラッグして磁石を下ろす',L.cx,H-25,12,'#a9c6cf','center',SANS,700);
+  }
+}
+function overlay(alpha){
+  X.fillStyle='rgba(3,8,14,'+(alpha||.78)+')';X.fillRect(0,0,W,H);
+}
+function drawTitle(){
+  drawBackground();
+  var oldStage=G.stage;G.stage=0;drawMachine();G.stage=oldStage;
+  var L=layout();
+  X.save();X.translate(L.cx+L.mw*.32,L.machineBottom+62);X.rotate(-.35);
+  var fake={value:500,r:34,id:1,state:'idle'};drawCoin(fake,0,0,G.t*.25,1);X.restore();
+  var g=X.createLinearGradient(0,0,0,H);g.addColorStop(0,'rgba(3,8,16,.18)');g.addColorStop(.42,'rgba(3,8,16,.3)');g.addColorStop(1,'rgba(3,8,16,.94)');
+  X.fillStyle=g;X.fillRect(0,0,W,H);
+  var top=H<620?88:105;
+  text('街角磁気回収業務・全6関門',L.cx,top-35,11,'#8fb3c2','center',SANS,800);
+  fitText('自販機の下の500円を、',L.cx,top,W-30,30,'#f4f0dd',SERIF,900);
+  fitText('磁石で釣り上げろ。',L.cx,top+43,W-30,36,'#ffd35c',SERIF,900);
+  text('落ちたのは小銭。拾うのは人生。',L.cx,top+79,13,'#b8c9ce','center',SANS,700);
+  var by=H-161;
+  button('start','紐を垂らす',L.cx-Math.min(170,W*.4),by,Math.min(340,W*.8),58,true,function(){audioInit();startRun();});
+  text('ドラッグ：振り子を動かす　／　離す：巻き上げ',L.cx,by+78,12,'#c1d2d5','center',SANS,700);
+  text('矢印キー＋スペースでも遊べます',L.cx,by+100,10,'#758f9a','center',SANS,600);
+}
+function drawIntro(){
+  drawPlayWorld();
+  overlay(.82);
+  var L=layout(),S=STAGES[G.stage];
+  var pw=Math.min(W-34,490),px=L.cx-pw/2,py=Math.max(84,H*.14);
+  rr(px,py,pw,Math.min(430,H-160),16);X.fillStyle='#101e29';X.fill();X.strokeStyle=G.stage===5?'#d7ac51':'#526f7d';X.lineWidth=2;X.stroke();
+  text('第'+(G.stage+1)+'関門 / 6',L.cx,py+33,12,'#8eabb7','center',SANS,800);
+  fitText(S.name,L.cx,py+72,pw-38,29,G.stage===5?'#ffe18a':'#f5eedb',SERIF,900);
+  X.fillStyle=G.stage===5?'#c14337':'#2d6177';rr(L.cx-78,py+102,156,28,14);X.fill();
+  text('新要素：'+S.novelty,L.cx,py+116,11,'#f4f3e7','center',SANS,800);
+  text('目標  ¥'+fmt(S.target)+'　　制限 '+S.time+'秒',L.cx,py+157,18,'#ffd76b','center',SANS,900);
+  wrapText(S.tip,L.cx,py+197,pw-56,18,14,'#d5e0e0');
+  if(G.stage===5)text('※この自販機は、もう自販機ではない。',L.cx,py+261,12,'#e59d91','center',SANS,700);
+  else text('失敗しても、この関門からすぐやり直せます。',L.cx,py+261,11,'#78949f','center',SANS,600);
+  button('begin','磁石を下ろす',L.cx-Math.min(150,pw*.4),py+292,Math.min(300,pw*.8),54,true,beginPlay);
+  button('title','タイトルへ',L.cx-65,py+358,130,36,false,goTitle);
+}
+function wrapText(s,cx,y,maxW,lineH,size,col){
+  var chars=s.split(''),lines=[],cur='';
+  X.font='700 '+size+'px '+SANS;
+  for(var i=0;i<chars.length;i++){
+    if(X.measureText(cur+chars[i]).width>maxW){lines.push(cur);cur=chars[i];}
+    else cur+=chars[i];
+  }
+  if(cur)lines.push(cur);
+  for(var j=0;j<lines.length;j++)text(lines[j],cx,y+j*lineH,size,col,'center',SANS,700);
+}
+function drawPlayWorld(){
+  drawBackground();drawMachine();drawGrate();
+  drawItems(true);drawGumStrings();drawRope();drawItems(false);drawMagnet();
+  drawHazards();drawParticles();drawHud();
+}
+function drawClearing(){
+  drawPlayWorld();overlay(.64);
+  var L=layout(),S=STAGES[G.stage],r=G.run.records[G.stage];
+  var t=ease(G.stageEndT/.45);
+  X.save();X.translate(L.cx,H*.34);X.scale(t,t);
+  text('関門クリア',0,0,16,'#a8c6ce','center',SANS,800);
+  text('¥'+fmt(r.amount),0,48,52,'#ffe074','center',SERIF,900);
+  X.restore();
+  text('回収時間 '+r.time.toFixed(1)+'秒',L.cx,H*.34+96,13,'#d3e0df','center',SANS,700);
+  if(G.stageEndT>.6){
+    var pw=Math.min(W-42,480);
+    wrapText(S.after,L.cx,H*.34+137,pw,21,14,'#e2d9c3');
+    button('next','第'+(G.stage+2)+'関門へ',L.cx-Math.min(150,W*.4),H-125,Math.min(300,W*.8),52,true,function(){resetStage(G.stage+1);});
+    text('クリックで展開を送る',L.cx,H-58,10,'#79929b','center',SANS,600);
+  }
+}
+function drawFail(){
+  drawPlayWorld();overlay(.78);
+  var L=layout();
+  text('回収失敗',L.cx,H*.22,13,'#dc8585','center',SANS,800);
+  fitText(G.failTitle,L.cx,H*.22+45,W-38,27,'#f2ddd4',SERIF,900);
+  wrapText(G.failReason,L.cx,H*.22+91,W-58,21,13,'#aebfc3');
+  text('今のは不運だった。磁石のせいではない。たぶん。',L.cx,H*.22+139,12,'#d1ac78','center',SANS,700);
+  button('retry','この関門を即リトライ',L.cx-Math.min(165,W*.42),H-211,Math.min(330,W*.84),56,true,retryStage);
+  button('result','ここまでのレシート',L.cx-Math.min(165,W*.42),H-144,Math.min(330,W*.84),43,false,showResult);
+  button('title','タイトルへ',L.cx-65,H-88,130,34,false,goTitle);
+}
+function drawPause(){
+  drawPlayWorld();overlay(.78);
+  var L=layout();
+  text('紐を持ったまま、休憩。',L.cx,H*.32,26,'#e9e5d6','center',SERIF,900);
+  button('resume','続ける',L.cx-145,H*.32+54,290,52,true,function(){G.scene='play';sClick();});
+  button('retry','この関門をやり直す',L.cx-145,H*.32+119,290,43,false,retryStage);
+  button('title','タイトルへ',L.cx-65,H*.32+177,130,34,false,goTitle);
+}
+function drawFinale(){
+  drawBackground();drawMachine();
+  var L=layout();
+  if(G.finaleT<2.8){
+    text('500円を、賽銭として検収。',L.cx,90,17,'#ffe397','center',SERIF,900);
+    text('自販機の神、起立。',L.cx,121,14,'#f2e8c5','center',SANS,800);
+  }else{
+    text('ご 利 益 は 、 物 理 。',L.cx,H*.25,Math.min(34,W*.07),'#fff0a3','center',SERIF,900);
+    if(G.finaleT>3.6)text('自販機は昇天した。お釣りは戻ってこない。',L.cx,H*.25+49,14,'#fff4d4','center',SANS,800);
+  }
+  drawParticles();
+}
+function receiptPath(x,y,w,h,tooth){
+  X.beginPath();X.moveTo(x,y+tooth);
+  for(var i=0;i<=w;i+=tooth*2){
+    X.lineTo(x+i,y+(i%(tooth*4)===0?0:tooth));
+  }
+  X.lineTo(x+w,y+h-tooth);
+  for(var j=w;j>=0;j-=tooth*2)X.lineTo(x+j,y+h-(j%(tooth*4)===0?0:tooth));
+  X.closePath();
+}
+function drawGodFaces(cx,y,mood){
+  var lit=Math.round(mood/20);
+  for(var i=0;i<5;i++){
+    var x=cx+(i-2)*31;
+    X.fillStyle=i<lit?'#c38b2d':'#b8ad99';rr(x-11,y-13,22,26,3);X.fill();
+    X.strokeStyle='#574b3c';X.lineWidth=1;X.stroke();
+    X.fillStyle='#f4ead0';X.fillRect(x-7,y-8,14,8);
+    X.fillStyle='#392f29';X.fillRect(x-5,y-5,3,2);X.fillRect(x+2,y-5,3,2);
+    X.beginPath();X.arc(x,y+5,4,0,Math.PI);X.stroke();
+  }
+}
+function drawResult(){
+  var bg=X.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#11192a');bg.addColorStop(1,'#2c2020');
+  X.fillStyle=bg;X.fillRect(0,0,W,H);
+  drawParticles();
+  var L=layout(),rw=Math.min(W-22,450),rh=Math.min(H-18,690),rx=L.cx-rw/2,ry=(H-rh)/2;
+  X.save();X.shadowColor='rgba(0,0,0,.6)';X.shadowBlur=24;
+  receiptPath(rx,ry,rw,rh,6);X.fillStyle='#eee5ce';X.fill();X.shadowBlur=0;
+  X.strokeStyle='#b6a98e';X.lineWidth=1;X.stroke();
+  X.save();X.clip();
+  for(var y=ry;y<ry+rh;y+=4)line(rx,y,rx+rw,y,'rgba(86,72,50,.018)',1);
+  var n=clearedCount(),mood=godMood();
+  var v=clamp((rh-118)/531,.62,1),Y=function(n){return ry+n*v;};
+  text('街角磁気回収組合',L.cx,Y(25),10,'#675b4a','center',SANS,800);
+  text('本 日 の 回 収 額',L.cx,Y(52),14,'#302c27','center',SERIF,900);
+  text('¥'+fmt(totalAmount()),L.cx,Y(91),Math.min(43,rw*.105),'#171a1b','center',SERIF,900);
+  line(rx+22,Y(119),rx+rw-22,Y(119),'#766a57',1);
+  fitText('称号「'+resultTitle()+'」',L.cx,Y(141),rw-36,20,'#812f27',SERIF,900);
+  text(n+' / 6 関門クリア　　リトライ '+G.run.retries+'回',L.cx,Y(169),11,'#514b42','center',SANS,700);
+  var sy=Y(197);
+  text('―― 関門別 回収明細 ――',L.cx,sy,10,'#675e50','center',SANS,700);
+  for(var i=0;i<6;i++){
+    var r=G.run.records[i],yy=sy+(22+i*22)*v;
+    var mark=r.status==='clear'?'済':r.status==='fail'?'失':'―';
+    text((i+1)+'. '+STAGES[i].name,rx+25,yy,11,'#373832','left',SANS,700);
+    text(mark+'  ¥'+fmt(r.amount),rx+rw-25,yy,11,r.status==='clear'?'#77372b':'#716d64','right',SANS,800);
+  }
+  var ty=sy+166*v;
+  line(rx+22,ty-10*v,rx+rw-22,ty-10*v,'#9a8d74',1);
+  text('お 宝 所 持 品',rx+25,ty+5*v,10,'#675e50','left',SANS,800);
+  var names=treasureNames();
+  wrapTextLeft(names,rx+25,ty+26*v,rw-50,16*v,10,'#363832');
+  var gy=ty+66*v;
+  text('神様の機嫌  '+mood+'%',L.cx,gy,12,'#4e4032','center',SANS,900);
+  drawGodFaces(L.cx,gy+31*v,mood);
+  var comment=mood>=90?'「また床に落として来い」':mood>=65?'「まあ、良い回収だった」':mood>=35?'「缶は避けるものである」':'「お前の方を吸いたい」';
+  text(comment,L.cx,gy+60*v,11,'#765c43','center',SERIF,700);
+  var by=ry+rh-116;
+  button('again','もう一度、最初から',rx+30,by,rw-60,43,true,function(){audioInit();startRun();});
+  if(n<6)button('retryResult','第'+(G.stage+1)+'関門から再挑戦',rx+30,by+50,(rw-68)/2,34,false,retryStage);
+  button('share','結果を共有',n<6?L.cx+4:rx+30,by+50,n<6?(rw-68)/2:rw-60,34,false,shareResult);
+  text('※レシートはスクショして供養できます',L.cx,ry+rh-15,9,'#7b715f','center',SANS,600);
+  X.restore();X.restore();
+  if(G.toastT>0){
+    rr(L.cx-120,H-49,240,34,10);X.fillStyle='rgba(8,16,23,.92)';X.fill();
+    text(G.toast,L.cx,H-32,12,'#eef5e9','center',SANS,700);
+  }
+}
+function wrapTextLeft(s,x,y,maxW,lineH,size,col){
+  var chars=s.split(''),lines=[],cur='';X.font='700 '+size+'px '+SANS;
+  for(var i=0;i<chars.length;i++){
+    if(X.measureText(cur+chars[i]).width>maxW){lines.push(cur);cur=chars[i];}
+    else cur+=chars[i];
+  }
+  if(cur)lines.push(cur);
+  for(var j=0;j<Math.min(lines.length,2);j++)text(lines[j],x,y+j*lineH,size,col,'left',SANS,700);
+}
+function shareResult(){
+  audioInit();sClick();
+  var data={title:'自販機の下の500円を、磁石で釣り上げろ。',text:G.shareText,url:location.href};
+  if(navigator.share){
+    try{
+      var p=navigator.share(data);
+      if(p&&p.catch)p.catch(function(){});
+    }catch(e){}
+  }else if(navigator.clipboard&&navigator.clipboard.writeText){
+    try{
+      var cp=navigator.clipboard.writeText(G.shareText+'\n'+location.href);
+      if(cp&&cp.then)cp.then(function(){toast('共有文をコピーしました');},function(){toast('スクショで結果を共有！');});
+    }catch(e){toast('スクショで結果を共有！');}
+  }else toast('スクショで結果を共有！');
+}
+function render(){
+  G.buttons=[];
+  X.setTransform(DPR,0,0,DPR,0,0);
+  X.clearRect(0,0,W,H);
+  var sx=G.shake?rnd(-G.shake,G.shake):0,sy=G.shake?rnd(-G.shake,G.shake):0;
+  X.save();X.translate(sx,sy);
+  if(G.scene==='title')drawTitle();
+  else if(G.scene==='intro')drawIntro();
+  else if(G.scene==='play')drawPlayWorld();
+  else if(G.scene==='clearing')drawClearing();
+  else if(G.scene==='fail')drawFail();
+  else if(G.scene==='pause')drawPause();
+  else if(G.scene==='finale')drawFinale();
+  else if(G.scene==='result')drawResult();
+  X.restore();
+  if(G.flash>0){X.globalAlpha=clamp(G.flash,0,1);X.fillStyle=G.flashCol;X.fillRect(0,0,W,H);X.globalAlpha=1;}
+}
+function pointerPos(e){
+  var r=CV.getBoundingClientRect();
+  return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};
+}
+function hitButton(p){
+  for(var i=G.buttons.length-1;i>=0;i--){
+    var b=G.buttons[i];
+    if(p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h)return b;
+  }
+  return null;
+}
+CV.addEventListener('pointerdown',function(e){
+  e.preventDefault();audioInit();
+  var p=pointerPos(e),b=hitButton(p);
+  G.uiConsumed=false;
+  if(b){G.uiConsumed=true;b.action();return;}
+  if(G.scene==='clearing'&&G.stageEndT>.6){resetStage(G.stage+1);return;}
+  if(G.scene==='play'){
+    G.pressed=true;G.reeling=false;G.reelBlockT=0;
+    G.ptr.x=p.x;G.ptr.y=p.y;
+    G.magnet.vx+=(p.x-G.magnet.x)*1.8;
+    G.magnet.vy+=(p.y-G.magnet.y)*1.2;
+    G.ropePulse=.25;
+    try{CV.setPointerCapture(e.pointerId);}catch(err){}
+  }
+},{passive:false});
+CV.addEventListener('pointermove',function(e){
+  if(!G.pressed||G.scene!=='play')return;
+  e.preventDefault();
+  var p=pointerPos(e),dx=p.x-G.ptr.x,dy=p.y-G.ptr.y;
+  G.ptr.x=p.x;G.ptr.y=p.y;
+  G.magnet.vx+=dx*2.3;G.magnet.vy+=dy*1.2;
+},{passive:false});
+function pointerRelease(e){
+  if(G.pressed&&G.scene==='play'){
+    e.preventDefault();G.pressed=false;G.reeling=true;G.reelBlockT=0;
+    tone(260,.05,'triangle',.035,0,390);
+  }
+}
+CV.addEventListener('pointerup',pointerRelease,{passive:false});
+CV.addEventListener('pointercancel',pointerRelease,{passive:false});
+CV.addEventListener('contextmenu',function(e){e.preventDefault();});
+window.addEventListener('keydown',function(e){
+  var k=e.key;
+  if(k==='m'||k==='M'){AU.muted=!AU.muted;return;}
+  if(k==='Enter'&&G.scene==='title'){audioInit();startRun();return;}
+  if(k==='Enter'&&G.scene==='intro'){beginPlay();return;}
+  if(k==='Escape'&&G.scene==='play'){G.scene='pause';G.pressed=false;return;}
+  if(G.scene!=='play')return;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(k)>=0)e.preventDefault();
+  if(k===' '){G.pressed=false;G.reeling=!G.reeling;G.reelBlockT=0;return;}
+  if(k.indexOf('Arrow')===0){
+    if(!G.pressed){G.ptr.x=G.magnet.x;G.ptr.y=G.magnet.y;G.pressed=true;G.reeling=false;}
+    if(k==='ArrowLeft')G.ptr.x-=28;
+    if(k==='ArrowRight')G.ptr.x+=28;
+    if(k==='ArrowUp')G.ptr.y-=25;
+    if(k==='ArrowDown')G.ptr.y+=25;
+    var L=layout();G.ptr.x=clamp(G.ptr.x,L.left,L.right);G.ptr.y=clamp(G.ptr.y,L.handY+40,L.floor);
+  }
+});
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden&&G.scene==='play'){G.scene='pause';G.pressed=false;}
+});
+var last=performance.now();
+function loop(now){
+  var dt=clamp((now-last)/1000,0,.034);last=now;
+  try{
+    update(dt);
+    render();
+    G.frames++;G.fpsT+=dt;
+    if(G.fpsT>=1){G.fps=G.frames/G.fpsT;G.frames=0;G.fpsT=0;}
+  }catch(e){console.error('[loop]',e);}
+  requestAnimationFrame(loop);
+}
+initDust();resize();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
